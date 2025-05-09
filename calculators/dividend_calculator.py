@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from decimal import Decimal
 import pandas as pd
@@ -97,20 +97,25 @@ class DividendCalculator(CalculatorInterface[List[Transaction], DividendCalculat
                 issues.append(f"Dividend #{i} has no country information")
         
         return issues
-    
-    def calculate(self, transactions: List[Transaction]) -> DividendCalculationResult:
+
+    def calculate(self, transactions: List[Transaction], tax_year: Optional[int] = None) -> DividendCalculationResult:
         """
-        Calculate dividend tax data.
-        
+        Calculate dividend tax data, optionally filtering by tax year.
+
         Args:
             transactions: List of transactions to process
-            
+            tax_year: Optional tax year to filter dividends (only include dividends from this year)
+
         Returns:
             DividendCalculationResult with calculation results
         """
         # Filter dividend transactions
         dividend_transactions = [tx for tx in transactions if isinstance(tx, DividendTransaction)]
-        
+
+        # Filter by tax year if specified
+        if tax_year is not None:
+            dividend_transactions = [tx for tx in dividend_transactions if tx.date.year == tax_year]
+
         # Validate input data
         issues = self.validate(dividend_transactions)
         if issues and "No dividend transactions found" in issues:
@@ -119,16 +124,17 @@ class DividendCalculator(CalculatorInterface[List[Transaction], DividendCalculat
             return DividendCalculationResult(issues=issues)
         elif issues:
             return DividendCalculationResult(issues=issues)
-        
+
         # Statistics
         stats = {
             'dividend_count': len(dividend_transactions),
             'total_dividend_pln': Decimal('0'),
             'total_tax_paid_abroad_pln': Decimal('0'),
             'total_tax_due_poland': Decimal('0'),
-            'total_tax_to_pay': Decimal('0')
+            'total_tax_to_pay': Decimal('0'),
+            'tax_year': tax_year
         }
-        
+
         # Group dividends by country
         summaries = {}
         

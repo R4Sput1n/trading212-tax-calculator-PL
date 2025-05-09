@@ -41,6 +41,9 @@ def parse_arguments():
     
     parser.add_argument('-r', '--report', type=str, default=settings.DEFAULT_REPORT_FILE,
                         help=f'Path to tax report file (for calculation mode, default: {settings.DEFAULT_REPORT_FILE})')
+
+    parser.add_argument('-y', '--year', type=int, default=None,
+                        help='Tax year to calculate (default: all years)')
     
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose output')
@@ -118,72 +121,90 @@ def processing_mode(args, services):
 def calculation_mode(args, services, transactions=None):
     """Calculate taxes and generate report"""
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting calculation mode, input: {args.input}, report: {args.report}")
-    
+
+    tax_year_info = f" for tax year {args.year}" if args.year else ""
+    logger.info(f"Starting calculation mode{tax_year_info}, input: {args.input}, report: {args.report}")
+
     # If transactions not provided, load from input file
     if transactions is None:
         # Load processed data
         if not os.path.isfile(args.input):
             logger.error(f"Input file not found: {args.input}")
             sys.exit(1)
-        
+
         import pandas as pd
         df = pd.read_csv(args.input)
-        
+
         # Create parser
         parser = Trading212Parser(
             exchange_rate_service=services['exchange_rate_service'],
             company_info_service=services['company_info_service']
         )
-        
+
         # Parse data
         transactions = parser.parse_data(df)
-        logger.info(f"Loaded {len(transactions)} transactions from {args.input}")
-    
+
+        if args.year:
+            logger.info(f"Loaded {len(transactions)} transactions, will filter sales/dividends for year {args.year}")
+        else:
+            logger.info(f"Loaded {len(transactions)} transactions (all years)")
+
     # Create calculators
     fifo_calculator = FifoCalculator()
     dividend_calculator = DividendCalculator(tax_rate=settings.DEFAULT_TAX_RATE)
-    
-    # Run calculations
-    fifo_result = fifo_calculator.calculate(transactions)
-    dividend_result = dividend_calculator.calculate(transactions)
-    
+
+    # Run calculations with optional year filtering
+    fifo_result = fifo_calculator.calculate(transactions, tax_year=args.year)
+    dividend_result = dividend_calculator.calculate(transactions, tax_year=args.year)
+
     # Check for issues
     if fifo_result.issues:
         logger.warning("FIFO calculation issues:")
         for issue in fifo_result.issues:
             logger.warning(f"  - {issue}")
-    
+
     if dividend_result.issues:
         logger.warning("Dividend calculation issues:")
         for issue in dividend_result.issues:
             logger.warning(f"  - {issue}")
-    
+
     # Generate tax form data
     tax_form_generator = TaxFormGenerator(tax_rate=float(settings.DEFAULT_TAX_RATE))
     tax_form_data = tax_form_generator.generate_tax_forms(fifo_result, dividend_result)
-    
+
+    # Include tax year in the report filename if specified
+    if args.year:
+        report_path = args.report
+        if '.' in report_path:
+            base, ext = os.path.splitext(report_path)
+            report_path = f"{base}_{args.year}{ext}"
+        else:
+            report_path = f"{report_path}_{args.year}"
+    else:
+        report_path = args.report
+
     # Export tax form data
-    os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(report_path)), exist_ok=True)
     tax_form_exporter = TaxFormExporter()
-    success = tax_form_exporter.export(tax_form_data, args.report)
-    
+    success = tax_form_exporter.export(tax_form_data, report_path)
+
     if success:
-        logger.info(f"Saved tax report to {args.report}")
-        print(f"Calculation completed. Tax report saved to {args.report}")
-        
+        logger.info(f"Saved tax report to {report_path}")
+        tax_year_str = f" for {args.year}" if args.year else ""
+        print(f"Calculation completed. Tax report{tax_year_str} saved to {report_path}")
+
         # Print summary
         print("\nSUMMARY:")
         print(f"Income from securities: {tax_form_data.pit38.total_income:.2f} PLN")
         print(f"Costs: {tax_form_data.pit38.total_cost:.2f} PLN")
-        
+
         if tax_form_data.pit38.profit > 0:
             print(f"Profit: {tax_form_data.pit38.profit:.2f} PLN")
         else:
             print(f"Loss: {tax_form_data.pit38.loss:.2f} PLN")
-        
+
         print(f"Tax due: {tax_form_data.pit38.tax_due} PLN")
-        
+
         if tax_form_data.pit38.dividend_data:
             print("\nDIVIDENDS:")
             for div in tax_form_data.pit38.dividend_data:
@@ -192,9 +213,9 @@ def calculation_mode(args, services, transactions=None):
                 print(f"    Tax paid abroad: {div['tax_paid_abroad']:.2f} PLN")
                 print(f"    Tax to pay in Poland: {div['tax_to_pay']:.2f} PLN")
     else:
-        logger.error(f"Failed to save tax report to {args.report}")
-        print(f"Calculation completed, but failed to save tax report to {args.report}")
-    
+        logger.error(f"Failed to save tax report to {report_path}")
+        print(f"Calculation completed, but failed to save tax report to {report_path}")
+
     return tax_form_data
 
 
