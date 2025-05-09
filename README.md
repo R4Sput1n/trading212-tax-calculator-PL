@@ -6,6 +6,8 @@ A modular, object-oriented tool for calculating taxes for Trading212 transaction
 
 This application processes CSV files exported from Trading212 and calculates tax data for Polish tax forms PIT-38 and PIT/ZG. It handles stock transactions (using FIFO method) and dividends, including foreign tax credits.
 
+> **DISCLAIMER**: I am not a tax advisor. The Polish tax system can be overwhelming at times, and this tool is provided as-is without any warranty. For any tax advice or detailed information, please contact your local tax advisor or Krajową Informację Skarbową ([contact form](https://www.podatki.gov.pl/skontaktuj-sie-z-nami/pytanie-e-mail/masz-pytanie/)).
+
 ## Features
 
 - Parsing Trading212 CSV export files
@@ -14,6 +16,7 @@ This application processes CSV files exported from Trading212 and calculates tax
 - Converting foreign currencies to PLN using NBP exchange rates
 - Generating tax data for PIT-38 and PIT/ZG forms
 - Exporting tax data to Excel
+- Filtering calculations by tax year
 
 ## Project Structure
 
@@ -83,6 +86,7 @@ The application can be run in different modes:
 - `-i, --input`: Input file or directory with CSV files
 - `-o, --output`: Path to output file (for processing mode)
 - `-r, --report`: Path to tax report file (for calculation mode)
+- `-y, --year`: Tax year to calculate (default: all years)
 - `-v, --verbose`: Enable verbose output
 
 ## Example Workflow
@@ -93,6 +97,11 @@ The application can be run in different modes:
    python main.py -m all -i /path/to/trading212_export.csv -v
    ```
 3. Review the generated tax report in `output/tax_report.xlsx`
+
+4. For specific tax year calculation:
+   ```
+   python main.py -m all -i /path/to/trading212_export.csv -y 2024
+   ```
 
 ## Tax Report Format
 
@@ -133,7 +142,7 @@ Run the test suite:
 ```
 pytest tests/
 ```
-There are not tests implemented at the moment
+There are no tests implemented at the moment.
 
 ## License
 
@@ -141,9 +150,10 @@ This project is licensed under the MIT License. See the LICENSE file for details
 
 ## Contributors
 
-- Your Name - Initial work
+- [R4Sput1n](https://github.com/R4Sput1n) - Initial work
+- [Claude 3.7 Sonnet](https://anthropic.com/claude) - Code refactoring, modularization, and documentation
 
 ## Acknowledgments
 
-- National Bank of Poland (NBP) for currency exchange rate API
-- yfinance for company information
+- [Artur Wiśniewski](https://stockbroker.pl/author/archislaw-makler/) for his [guide on ETF tax calculations in Poland](https://stockbroker.pl/etf-jak-rozliczac-podatki-przewodnik-krok-po-kroku/)
+
