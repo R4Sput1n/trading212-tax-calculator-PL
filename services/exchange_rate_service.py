@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+
+import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -37,84 +39,78 @@ class NBPExchangeRateService(ExchangeRateService):
         """
         self.base_url = base_url
         self._cache: Dict[str, float] = {}  # Cache for exchange rates
-    
+
     def get_exchange_rate(self, date: datetime, currency_code: str) -> Optional[float]:
         """
         Get exchange rate from NBP API for specified date and currency.
         For GBX (British pence), converts to GBP and divides by 100.
         Uses exchange rate from the last business day before the specified date.
-        
+        Will try up to 7 previous business days if needed.
+
         Args:
             date: Date for which to get the exchange rate
             currency_code: Currency code (e.g., 'USD', 'EUR', 'GBX')
-            
+
         Returns:
             Exchange rate or None if not available
         """
+        # Check for None or NaN currency code
+        if currency_code is None or pd.isna(currency_code) or currency_code == "":
+            return 1.0  # Default to 1.0 for deposit transactions with no currency
+
         # Return 1.0 for PLN
         if currency_code == "PLN":
             return 1.0
-        
+
         # Use cache if available
         cache_key = f"{date.strftime('%Y-%m-%d')}_{currency_code}"
         if cache_key in self._cache:
             return self._cache[cache_key]
-        
+
         # Save original currency code
         original_currency = currency_code
         factor = 1.0
-        
+
         # Convert GBX (British pence) to GBP (British pound)
         if currency_code == "GBX":
             currency_code = "GBP"
             factor = 100.0  # 1 GBP = 100 GBX
-        
-        # Get previous business day
+
+        # Try up to 7 previous business days
         prev_business_day = get_previous_business_day(date)
-        formatted_date = prev_business_day.strftime("%Y-%m-%d")
-        
-        # Get data from NBP API
-        url = f"{self.base_url}/{currency_code}/{formatted_date}/"
-        
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                data = response.json()
-                rate = data["rates"][0]["mid"]
-                
-                # Adjust rate for original currency
-                if original_currency == "GBX":
-                    rate = rate / factor  # Divide by 100 to get rate for 1 GBX
-                
-                # Cache the result
-                self._cache[cache_key] = rate
-                
-                return rate
-            else:
-                # Try again with the previous business day
-                prev_business_day = get_previous_business_day(prev_business_day)
-                formatted_date = prev_business_day.strftime("%Y-%m-%d")
-                url = f"{self.base_url}/{currency_code}/{formatted_date}/"
+        max_attempts = 7
+
+        for attempt in range(max_attempts):
+            formatted_date = prev_business_day.strftime("%Y-%m-%d")
+            url = f"{self.base_url}/{currency_code}/{formatted_date}/"
+
+            try:
                 response = requests.get(url)
-                
                 if response.status_code == 200:
                     data = response.json()
                     rate = data["rates"][0]["mid"]
-                    
+
                     # Adjust rate for original currency
                     if original_currency == "GBX":
-                        rate = rate / factor
-                    
+                        rate = rate / factor  # Divide by 100 to get rate for 1 GBX
+
                     # Cache the result
                     self._cache[cache_key] = rate
-                    
+
                     return rate
                 else:
-                    print(f"Could not get exchange rate for {original_currency} on {formatted_date}")
-                    return None
-        except Exception as e:
-            print(f"Error getting exchange rate: {e}")
-            return None
+                    # Try the previous business day
+                    print(f'Could not get exchange rate for day {prev_business_day} for currency {currency_code}')
+                    prev_business_day = get_previous_business_day(prev_business_day)
+                    print(f'Retrying for {prev_business_day}')
+            except Exception as e:
+                print(f"Error getting exchange rate for attempt {attempt + 1}: {e}")
+                # Try the next day anyway
+                prev_business_day = get_previous_business_day(prev_business_day)
+
+        # If we get here, we couldn't find a rate after all attempts
+        print(f"Could not get exchange rate for {original_currency} after {max_attempts} attempts")
+        return None
 
 
 class MockExchangeRateService(ExchangeRateService):
