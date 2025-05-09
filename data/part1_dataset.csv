@@ -1,7 +1,0 @@
-Action,Time,ISIN,Ticker,Name,Notes,ID,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion fee,Currency (Currency conversion fee),French transaction tax,Currency (French transaction tax)
-Market buy,2023-01-15 10:30:00,US0378331005,AAPL,Apple Inc.,,123456,10,150,USD,4.0,,,1500,USD,,,5.0,PLN,,
-Market buy,2023-02-20 14:45:00,DE0007100000,MBG,Mercedes-Benz Group AG,,123457,20,60,EUR,4.5,,,1200,EUR,,,3.0,PLN,6.0,PLN
-Market buy,2023-03-10 09:15:00,US0378331005,AAPL,Apple Inc.,,123458,5,160,USD,4.1,,,800,USD,,,2.5,PLN,,
-Market sell,2023-04-20 11:20:00,US0378331005,AAPL,Apple Inc.,,123459,8,170,USD,4.2,1360,USD,1360,USD,,,4.0,PLN,,
-Market buy,2023-05-10 10:00:00,FR0000120271,TTE,TotalEnergies SE,,123464,15,55,EUR,4.55,,,825,EUR,,,2.5,PLN,4.1,PLN
-Market buy,2023-06-15 13:30:00,GB00B1YW4409,III,3i Group,,123461,30,20,GBP,5.2,,,600,GBP,,,1.5,PLN,,
