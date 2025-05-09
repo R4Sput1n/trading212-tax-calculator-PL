@@ -25,17 +25,31 @@ class Trading212Parser(ParserInterface):
         """Parse a single Trading212 CSV file"""
         df = pd.read_csv(file_path)
         return self.parse_data(df)
-    
+
     def parse_files(self, file_paths: List[str]) -> List[Transaction]:
-        """Parse multiple Trading212 CSV files"""
+        """Parse multiple Trading212 CSV files with duplicate detection"""
         if not file_paths:
             return []
-        
+
         all_transactions = []
+        seen_transactions = set()  # Track unique transaction identifiers
+
         for file_path in file_paths:
             transactions = self.parse_file(file_path)
-            all_transactions.extend(transactions)
-        
+
+            for tx in transactions:
+                # Create a unique identifier for the transaction
+                # Using relevant fields that should be unique for each real transaction
+                tx_id = (tx.date, tx.ticker, tx.get_transaction_type(),
+                         tx.quantity, tx.price_per_share)
+
+                # Only add if not seen before
+                if tx_id not in seen_transactions:
+                    seen_transactions.add(tx_id)
+                    all_transactions.append(tx)
+                else:
+                    print(f"Skipping duplicate transaction: {tx.date} {tx.ticker} {tx.get_transaction_type()}")
+
         # Sort by date
         all_transactions.sort(key=lambda x: x.date)
         return all_transactions

@@ -18,7 +18,7 @@ class Settings:
     DEFAULT_OUTPUT_DIR = "output"
     
     # Default file paths
-    DEFAULT_PROCESSED_FILE = os.path.join(DEFAULT_DATA_DIR, "processed_data.csv")
+    DEFAULT_PROCESSED_FILE = os.path.join(DEFAULT_OUTPUT_DIR, "processed_data.csv")
     DEFAULT_REPORT_FILE = os.path.join(DEFAULT_OUTPUT_DIR, "tax_report.xlsx")
     DEFAULT_LOG_FILE = os.path.join(DEFAULT_OUTPUT_DIR, "tax_calculator.log")
     
