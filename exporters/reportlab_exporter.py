@@ -42,18 +42,66 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
     def _register_fonts(self):
         """Register fonts for Polish characters"""
-        # You can add custom fonts here if needed, but for now we'll use system fonts
-        # that support Polish characters
-
-        # ReportLab will use system DejaVu fonts that have good Unicode support
+        # Try to register Windows fonts for Polish characters
         try:
-            # These fonts are commonly available and support Polish characters
-            pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
-            pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
-            self.logger.info("Registered DejaVu Sans fonts")
-        except:
-            # If DejaVu fonts are not available, use default fonts
-            self.logger.warning("Could not register DejaVu Sans fonts, using default fonts")
+            # Import required modules
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+
+            # Find Windows font directory (will be None on non-Windows systems)
+            windows_font_dir = os.environ.get('WINDIR')
+            if windows_font_dir:
+                windows_font_dir = os.path.join(windows_font_dir, 'Fonts')
+
+                # Define font files with full paths
+                arial_path = os.path.join(windows_font_dir, 'arial.ttf')
+                arial_bold_path = os.path.join(windows_font_dir, 'arialbd.ttf')
+                times_path = os.path.join(windows_font_dir, 'times.ttf')
+                calibri_path = os.path.join(windows_font_dir, 'calibri.ttf')
+
+                # Try Arial first
+                if os.path.exists(arial_path):
+                    pdfmetrics.registerFont(TTFont('Arial', arial_path))
+
+                    if os.path.exists(arial_bold_path):
+                        pdfmetrics.registerFont(TTFont('Arial-Bold', arial_bold_path))
+                        self.base_font_name = 'Arial'
+                        self.bold_font_name = 'Arial-Bold'
+                        self.logger.info(f"Using Arial fonts from {windows_font_dir}")
+                        return
+                    else:
+                        # If bold Arial not available, use regular for both
+                        self.base_font_name = 'Arial'
+                        self.bold_font_name = 'Arial'
+                        self.logger.info(f"Using Arial font (no bold) from {windows_font_dir}")
+                        return
+
+                # Try Times if Arial not available
+                elif os.path.exists(times_path):
+                    pdfmetrics.registerFont(TTFont('Times-Custom', times_path))
+                    self.base_font_name = 'Times-Custom'
+                    self.bold_font_name = 'Times-Custom'
+                    self.logger.info(f"Using Times fonts from {windows_font_dir}")
+                    return
+
+                # Try Calibri if Times not available
+                elif os.path.exists(calibri_path):
+                    pdfmetrics.registerFont(TTFont('Calibri', calibri_path))
+                    self.base_font_name = 'Calibri'
+                    self.bold_font_name = 'Calibri'
+                    self.logger.info(f"Using Calibri fonts from {windows_font_dir}")
+                    return
+
+            # Log which fonts were registered
+            self.logger.info(f"Registered fonts: {list(pdfmetrics.getRegisteredFontNames())}")
+
+        except Exception as e:
+            self.logger.error(f"Error registering fonts: {e}")
+
+        # If no custom fonts registered, fall back to default
+        self.base_font_name = 'Helvetica'
+        self.bold_font_name = 'Helvetica-Bold'
+        self.logger.warning("No custom fonts registered, using Helvetica (Polish characters may not display correctly)")
 
     def _create_custom_styles(self):
         """Create custom paragraph and table styles"""
@@ -61,7 +109,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         self.styles.add(ParagraphStyle(
             name='ReportTitle',
             parent=self.styles['Title'],
-            fontName='Helvetica-Bold',
+            fontName=self.bold_font_name,
             fontSize=16,
             alignment=TA_CENTER,
             spaceAfter=12
@@ -70,7 +118,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         self.styles.add(ParagraphStyle(
             name='ReportChapter',
             parent=self.styles['Heading1'],
-            fontName='Helvetica-Bold',
+            fontName=self.bold_font_name,
             fontSize=14,
             alignment=TA_LEFT,
             spaceAfter=10
@@ -79,7 +127,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         self.styles.add(ParagraphStyle(
             name='ReportSection',
             parent=self.styles['Heading2'],
-            fontName='Helvetica-Bold',
+            fontName=self.bold_font_name,
             fontSize=12,
             alignment=TA_LEFT,
             spaceAfter=8
@@ -88,7 +136,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         self.styles.add(ParagraphStyle(
             name='ReportBodyText',
             parent=self.styles['Normal'],
-            fontName='Helvetica',
+            fontName=self.base_font_name,
             fontSize=10,
             alignment=TA_LEFT,
             spaceAfter=6,
@@ -100,7 +148,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
@@ -108,7 +156,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
         # Table data style
         self.table_data_style = TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),  # Align ticker/name columns left
@@ -119,8 +167,8 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
         # Summary table style
         self.summary_table_style = TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, -1), self.base_font_name),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
@@ -269,7 +317,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         # Create table for personal data
         personal_table = Table(personal_data, colWidths=[4 * cm, 10 * cm])
         personal_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
@@ -337,7 +385,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         ]
 
         formula_style = TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 20),
@@ -411,12 +459,12 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
 
                 # Data style
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
                 ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
                 ('ALIGN', (2, 1), (2, -1), 'LEFT'),  # Align name column left
@@ -599,7 +647,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         ]
 
         formula_style = TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 20),
@@ -669,19 +717,19 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 8),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
 
             # Data style
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
             ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
 
             # Total row style
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), self.bold_font_name),
 
             # Grid
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
@@ -745,12 +793,12 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
 
                 # Data style
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
                 ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
                 ('ALIGN', (2, 1), (2, -1), 'LEFT'),  # Align name column left
@@ -848,11 +896,11 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
 
             # Data style
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),
             ('ALIGN', (1, 1), (1, -1), 'LEFT'),
@@ -911,17 +959,17 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
 
                 # Data style
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
                 ('FONTSIZE', (0, 1), (-1, -1), 9),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
 
                 # Total row style
-                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (0, -1), (-1, -1), self.bold_font_name),
 
                 # Grid
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
@@ -968,11 +1016,11 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
 
                 # Data style
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
                 ('FONTSIZE', (0, 1), (-1, -1), 9),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
@@ -1010,6 +1058,8 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             True if export was successful, False otherwise
         """
         try:
+            self.logger.info(f"Using font: {self.base_font_name}")
+            self.logger.info(f"All registered fonts: {list(pdfmetrics.getRegisteredFontNames())}")
             tax_year = data.get('tax_year')
             fifo_result = data.get('fifo_result')
             dividend_result = data.get('dividend_result')
