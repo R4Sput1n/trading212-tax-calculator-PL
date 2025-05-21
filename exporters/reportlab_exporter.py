@@ -21,7 +21,6 @@ from calculators.dividend_calculator import DividendCalculationResult
 
 logger = logging.getLogger(__name__)
 
-
 class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
     """Exporter for tax calculation results to PDF report using ReportLab"""
 
@@ -145,19 +144,20 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             encoding='utf-8'
         ))
 
+        # Add a new cell style for wrapped header text
         self.styles.add(ParagraphStyle(
             name='TableHeader',
             parent=self.styles['Normal'],
             fontName=self.bold_font_name,
             fontSize=8,
             alignment=TA_CENTER,
-            leading=10,
+            leading=10,  # Slightly increased leading for wrapped text
             spaceAfter=0,
             spaceBefore=0,
             encoding='utf-8'
         ))
 
-        # Table header style
+        # Table header style - updated for better text wrapping
         self.table_header_style = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -165,9 +165,9 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 8),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-            ('TOPPADDING', (0, 0), (-1, 0), 5),  # Add top padding for header cells
+            ('TOPPADDING', (0, 0), (-1, 0), 5),  # Added top padding for header cells
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),  # Vertically align header text to middle
+            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),  # Vertical alignment for headers
         ])
 
         # Table data style
@@ -191,6 +191,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ])
 
+    # Helper function to create paragraph-wrapped cells for table headers
     def _create_wrapped_header_cell(self, text):
         """Create a Paragraph object with wrapping for table headers"""
         return Paragraph(text, self.styles['TableHeader'])
@@ -431,7 +432,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         if buy_transactions:
             elements.append(Paragraph("1.2 Transakcje zakupu", self.styles['ReportSection']))
 
-            # Table header
+            # Table header - use Paragraph objects for wrapping text in headers
             buy_header = [
                 self._create_wrapped_header_cell("Data"),
                 self._create_wrapped_header_cell("Ticker"),
@@ -461,7 +462,6 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
             # Table data
             buy_data = [buy_header]
-
             for (ticker, date), tx in sorted(buy_transactions.items(), key=lambda x: x[0][1]):
                 # Format exchange rate based on currency
                 if tx.currency == 'GBX':
@@ -482,16 +482,18 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                     self.format_currency(tx.fees_pln or Decimal('0'))
                 ])
 
-            # Create table
+                # Create table with updated style for wrapped headers
             buy_table = Table(buy_data, colWidths=col_widths, repeatRows=1)
             buy_table_style = TableStyle([
-                # Header style
+                # Header style with updated padding and alignment for wrapped text
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
                 # Data style
                 ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
@@ -521,9 +523,19 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         if sell_transactions:
             elements.append(Paragraph("1.3 Transakcje sprzedaży", self.styles['ReportSection']))
 
-            # Table header
-            sell_header = ["Data", "Ticker", "Nazwa", "Ilość", "Cena", "Waluta", "Kurs NBP",
-                           "Wartość w walucie", "Wartość w PLN", "Opłaty w PLN"]
+            # Table header with wrapped text in Paragraph objects
+            sell_header = [
+                self._create_wrapped_header_cell("Data"),
+                self._create_wrapped_header_cell("Ticker"),
+                self._create_wrapped_header_cell("Nazwa"),
+                self._create_wrapped_header_cell("Ilość"),
+                self._create_wrapped_header_cell("Cena"),
+                self._create_wrapped_header_cell("Waluta"),
+                self._create_wrapped_header_cell("Kurs NBP"),
+                self._create_wrapped_header_cell("Wartość w walucie"),
+                self._create_wrapped_header_cell("Wartość w PLN"),
+                self._create_wrapped_header_cell("Opłaty w PLN")
+            ]
 
             # Table data
             sell_data = [sell_header]
@@ -561,9 +573,18 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         if fifo_result.matches:
             elements.append(Paragraph("1.4 Rozliczenie transakcji metodą FIFO", self.styles['ReportSection']))
 
-            # Table header
-            matches_header = ["Ticker", "Data zakupu", "Data sprzedaży", "Liczba akcji", "Przychód (PLN)",
-                              "Koszt (PLN)", "Dochód/Strata (PLN)", "% zysku/straty", "Kraj"]
+            # Table header with wrapped text
+            matches_header = [
+                self._create_wrapped_header_cell("Ticker"),
+                self._create_wrapped_header_cell("Data zakupu"),
+                self._create_wrapped_header_cell("Data sprzedaży"),
+                self._create_wrapped_header_cell("Liczba akcji"),
+                self._create_wrapped_header_cell("Przychód (PLN)"),
+                self._create_wrapped_header_cell("Koszt (PLN)"),
+                self._create_wrapped_header_cell("Dochód/Strata (PLN)"),
+                self._create_wrapped_header_cell("% zysku/straty"),
+                self._create_wrapped_header_cell("Kraj")
+            ]
 
             # Calculate column widths for matches table
             match_col_widths = [
@@ -604,10 +625,8 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             elements.append(Paragraph("1.4 Rozliczenie transakcji metodą FIFO", self.styles['ReportSection']))
             elements.append(Paragraph("Brak transakcji do rozliczenia.", self.styles['ReportBodyText']))
 
-        # Add transaction details section here (detailed per-transaction breakdowns)
         elements.extend(self.create_transaction_details_section(fifo_result))
-
-        # FIFO summary (now 1.6 instead of 1.5)
+        # FIFO summary
         elements.append(Paragraph("1.6 Podsumowanie rozliczenia metodą FIFO", self.styles['ReportSection']))
 
         # Calculate summary data
@@ -656,7 +675,6 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         elements.append(Paragraph(
             "Poniżej przedstawiono szczegółowe rozliczenie każdej transakcji sprzedaży z uwzględnieniem dopasowanych transakcji zakupu.",
             self.styles['ReportBodyText']))
-
         # Group matches by sell transaction
         sell_transactions = {}
         for match in fifo_result.matches:
@@ -686,7 +704,6 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Section title
             elements.append(Paragraph(f"1.5.{section_idx} Szczegóły dla {ticker} ({self.format_date(sell_date)})",
                                       self.styles['ReportBodyText']))
-
             # Create transaction details table (headers as rows for better readability)
             tx_details = [
                 ["Ticker:", ticker],
@@ -773,8 +790,8 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 elements.append(buy_table)
                 elements.append(Spacer(1, 0.2 * cm))
 
-                total_cost_pln += match.cost_pln
-                total_income_pln += match.income_pln
+                total_cost_pln += buy_match.cost_pln
+                total_income_pln += buy_match.income_pln
 
             # Final calculation for this sell transaction
             profit_loss_pln = total_income_pln - total_cost_pln
@@ -885,9 +902,14 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         # Create global summary table
         elements.append(Paragraph("2.2 Podsumowanie wszystkich dywidend", self.styles['ReportSection']))
 
-        # Table header
-        summary_header = ["Państwo", "Dywidenda (PLN)", "Podatek pobrany (PLN)",
-                          "Podatek PL 19% (PLN)", "Do zapłaty w PL (PLN)"]
+        # Table header with wrapped text
+        summary_header = [
+            self._create_wrapped_header_cell("Państwo"),
+            self._create_wrapped_header_cell("Dywidenda (PLN)"),
+            self._create_wrapped_header_cell("Podatek pobrany (PLN)"),
+            self._create_wrapped_header_cell("Podatek PL 19% (PLN)"),
+            self._create_wrapped_header_cell("Do zapłaty w PL (PLN)")
+        ]
 
         # Calculate column widths
         summary_col_widths = [
@@ -900,7 +922,6 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
         # Table data
         summary_data = [summary_header]
-
         total_dividend = Decimal('0')
         total_tax_abroad = Decimal('0')
         total_tax_poland = Decimal('0')
@@ -932,13 +953,15 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         # Create table
         summary_table = Table(summary_data, colWidths=summary_col_widths, repeatRows=1)
         summary_style = TableStyle([
-            # Header style
+            # Header style with improved padding and alignment for wrapped text
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 8),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+            ('TOPPADDING', (0, 0), (-1, 0), 5),
+            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
             # Data style
             ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
@@ -962,9 +985,20 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         for country_idx, (country, summary) in enumerate(sorted(dividend_result.summaries.items()), 1):
             elements.append(Paragraph(f"2.{country_idx + 2} Dywidendy - {country}", self.styles['ReportSection']))
 
-            # Table header
-            div_header = ["Data", "Ticker", "Nazwa", "Ilość", "Dywidenda/akcję", "Waluta", "Kurs NBP",
-                          "Wartość w walucie", "Wartość w PLN", "Podatek pobrany", "Podatek w PLN"]
+            # Table header with wrapped text
+            div_header = [
+                self._create_wrapped_header_cell("Data"),
+                self._create_wrapped_header_cell("Ticker"),
+                self._create_wrapped_header_cell("Nazwa"),
+                self._create_wrapped_header_cell("Ilość"),
+                self._create_wrapped_header_cell("Dywidenda/akcję"),
+                self._create_wrapped_header_cell("Waluta"),
+                self._create_wrapped_header_cell("Kurs NBP"),
+                self._create_wrapped_header_cell("Wartość w walucie"),
+                self._create_wrapped_header_cell("Wartość w PLN"),
+                self._create_wrapped_header_cell("Podatek pobrany"),
+                self._create_wrapped_header_cell("Podatek w PLN")
+            ]
 
             # Calculate column widths
             div_col_widths = [
@@ -1008,13 +1042,15 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Create table
             div_table = Table(div_data, colWidths=div_col_widths, repeatRows=1)
             div_style = TableStyle([
-                # Header style
+                # Header style with improved padding and alignment for wrapped text
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
                 # Data style
                 ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
@@ -1136,9 +1172,14 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         if dividend_result.summaries:
             elements.append(Paragraph("3.1.1 Sekcja G - Dywidendy zagraniczne", self.styles['ReportSection']))
 
-            # Table header
-            g_header = ["Państwo", "Przychód (PLN)", "Podatek należny 19% (PLN)",
-                        "Podatek zapłacony za granicą (PLN)", "Różnica (PLN)"]
+            # Table header with wrapped text
+            g_header = [
+                self._create_wrapped_header_cell("Państwo"),
+                self._create_wrapped_header_cell("Przychód (PLN)"),
+                self._create_wrapped_header_cell("Podatek należny 19% (PLN)"),
+                self._create_wrapped_header_cell("Podatek zapłacony za granicą (PLN)"),
+                self._create_wrapped_header_cell("Różnica (PLN)")
+            ]
 
             # Table data
             g_data = [g_header]
@@ -1174,12 +1215,15 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Create table
             g_table = Table(g_data, colWidths=[5 * cm, 3 * cm, 3 * cm, 3 * cm, 3 * cm])
             g_style = TableStyle([
-                # Header style
+                # Header style with improved padding and alignment for wrapped text
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
                 # Data style
                 ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
@@ -1196,6 +1240,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             g_table.setStyle(g_style)
 
             elements.append(g_table)
+
         else:
             elements.append(Paragraph("3.1.1 Sekcja G - Dywidendy zagraniczne", self.styles['ReportSection']))
             elements.append(Paragraph("Brak dywidend zagranicznych do wykazania w sekcji G.",
@@ -1208,9 +1253,14 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Group by country
             country_groups = fifo_df.groupby('country')
 
-            # Table header
-            pitzg_header = ["Państwo", "Przychód (PLN)", "Koszty (PLN)", "Dochód (PLN)",
-                            "Podatek zapłacony za granicą (PLN)"]
+            # Table header with wrapped text
+            pitzg_header = [
+                self._create_wrapped_header_cell("Państwo"),
+                self._create_wrapped_header_cell("Przychód (PLN)"),
+                self._create_wrapped_header_cell("Koszty (PLN)"),
+                self._create_wrapped_header_cell("Dochód (PLN)"),
+                self._create_wrapped_header_cell("Podatek zapłacony za granicą (PLN)")
+            ]
 
             # Table data
             pitzg_data = [pitzg_header]
@@ -1231,12 +1281,15 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Create table
             pitzg_table = Table(pitzg_data, colWidths=[4 * cm, 4 * cm, 4 * cm, 4 * cm, 4 * cm])
             pitzg_style = TableStyle([
-                # Header style
+                # Header style with improved padding and alignment for wrapped text
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
 
                 # Data style
                 ('FONTNAME', (0, 1), (-1, -1), self.base_font_name),
@@ -1265,6 +1318,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
 
         return elements
 
+
     def export(self, data: Dict[str, Any], output_path: str) -> bool:
         """
         Export tax calculation results to a PDF report.
@@ -1286,7 +1340,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             # Make sure output directory exists
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-            # Create PDF document
+            # Create PDF document with metadata to fix the anonymous title issue
             doc = SimpleDocTemplate(
                 output_path,
                 pagesize=A4,
@@ -1296,10 +1350,11 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 bottomMargin=2 * cm
             )
 
+            # Set document metadata to fix the anonymous title
             doc.title = "Trading212 Tax Calculator Report"
             doc.author = "Trading212 Tax Calculator"
-            doc.subject = "Tax Report"
-
+            doc.subject = f"Raport podatkowy" + (f" {tax_year}" if tax_year else "")
+            doc.creator = "Trading212 Tax Calculator"
             # List to store PDF elements
             elements = []
 
