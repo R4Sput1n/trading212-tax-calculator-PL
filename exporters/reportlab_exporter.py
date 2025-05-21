@@ -574,8 +574,11 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             elements.append(Paragraph("1.4 Rozliczenie transakcji metodą FIFO", self.styles['ReportSection']))
             elements.append(Paragraph("Brak transakcji do rozliczenia.", self.styles['ReportBodyText']))
 
-        # FIFO summary
-        elements.append(Paragraph("1.5 Podsumowanie rozliczenia metodą FIFO", self.styles['ReportSection']))
+        # Add transaction details section here (detailed per-transaction breakdowns)
+        elements.extend(self.create_transaction_details_section(fifo_result))
+
+        # FIFO summary (now 1.6 instead of 1.5)
+        elements.append(Paragraph("1.6 Podsumowanie rozliczenia metodą FIFO", self.styles['ReportSection']))
 
         # Calculate summary data
         total_income = sum(match.income_pln for match in fifo_result.matches)
@@ -603,6 +606,168 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         elements.append(summary_table)
 
         elements.append(PageBreak())
+
+        return elements
+
+    def create_transaction_details_section(self, fifo_result: FifoCalculationResult) -> List[Any]:
+        """
+        Create a detailed section for each sell transaction.
+
+        Args:
+            fifo_result: Result of FIFO calculation
+
+        Returns:
+            List of flowable elements
+        """
+        elements = []
+
+        # Section title (now as subsection of FIFO)
+        elements.append(Paragraph("1.5 Szczegóły transakcji", self.styles['ReportSection']))
+        elements.append(Paragraph(
+            "Poniżej przedstawiono szczegółowe rozliczenie każdej transakcji sprzedaży z uwzględnieniem dopasowanych transakcji zakupu.",
+            self.styles['ReportBodyText']))
+
+        # Group matches by sell transaction
+        sell_transactions = {}
+        for match in fifo_result.matches:
+            # Group by sell transaction (ticker and date combination)
+            sell_key = (match.sell_transaction.ticker, match.sell_date)
+            if sell_key not in sell_transactions:
+                sell_transactions[sell_key] = []
+            sell_transactions[sell_key].append(match)
+
+        # Sort sell transactions by date and ticker
+        sorted_sell_keys = sorted(sell_transactions.keys(), key=lambda x: (x[1], x[0]))
+
+        # Add section for each sell transaction
+        for section_idx, sell_key in enumerate(sorted_sell_keys, 1):
+            ticker, sell_date = sell_key
+            matches = sell_transactions[sell_key]
+
+            # Get the sell transaction from the first match (all matches in this group have the same sell transaction)
+            sell_tx = matches[0].sell_transaction
+
+            # Section title
+            elements.append(Paragraph(f"1.5.{section_idx} Szczegóły dla {ticker} ({self.format_date(sell_date)})",
+                                      self.styles['ReportBodyText']))
+
+            # Create transaction details table (headers as rows for better readability)
+            tx_details = [
+                ["Ticker:", ticker],
+                ["Nazwa:", sell_tx.name],
+                ["Data sprzedaży:", self.format_date(sell_date)],
+                ["Ilość sprzedanych akcji:", self.format_decimal(sell_tx.quantity)],
+                ["Cena sprzedaży (za akcję):", f"{self.format_decimal(sell_tx.price_per_share)} {sell_tx.currency}"],
+                ["Kurs NBP dla sprzedaży:", self.format_decimal(sell_tx.exchange_rate)],
+                ["Wartość sprzedaży w walucie:",
+                 f"{self.format_currency(sell_tx.total_value_foreign)} {sell_tx.currency}"],
+                ["Wartość sprzedaży w PLN:", f"{self.format_currency(sell_tx.total_value_pln)} PLN"],
+                ["Opłaty przy sprzedaży:", f"{self.format_currency(sell_tx.fees_pln or Decimal('0'))} PLN"]
+            ]
+
+            # Add spacer
+            elements.append(Spacer(1, 0.3 * cm))
+
+            # Create table
+            tx_table = Table(tx_details, colWidths=[5 * cm, 10 * cm])
+            tx_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (0, -1), self.bold_font_name),
+                ('FONTNAME', (1, 0), (1, -1), self.base_font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ]))
+
+            elements.append(tx_table)
+
+            # Add matched buy transactions
+            elements.append(Spacer(1, 0.5 * cm))
+            elements.append(Paragraph("Dopasowane transakcje zakupu:", self.styles['ReportBodyText']))
+
+            # Calculation details for each matched buy transaction
+            total_cost_pln = Decimal('0')
+            total_income_pln = Decimal('0')
+
+            for idx, match in enumerate(sorted(matches, key=lambda m: m.buy_date), 1):
+                # Buy transaction details
+                buy_tx = match.buy_transaction
+
+                buy_details = [
+                    ["Transakcja zakupu #" + str(idx), ""],
+                    ["Data zakupu:", self.format_date(match.buy_date)],
+                    ["Ilość dopasowanych akcji:", self.format_decimal(match.used_quantity)],
+                    ["Cena zakupu (za akcję):", f"{self.format_decimal(buy_tx.price_per_share)} {buy_tx.currency}"],
+                    ["Kurs NBP dla zakupu:", self.format_decimal(buy_tx.exchange_rate)],
+                    ["Wartość zakupu w walucie (dla dopasowanych akcji):",
+                     f"{self.format_currency(buy_tx.price_per_share * match.used_quantity)} {buy_tx.currency}"],
+                    ["Wartość zakupu w PLN (dla dopasowanych akcji):",
+                     f"{self.format_currency(match.cost_pln)} PLN"],
+                ]
+
+                # Create table
+                buy_table = Table(buy_details, colWidths=[7 * cm, 8 * cm])
+                buy_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (0, -1), self.base_font_name),
+                    ('FONTNAME', (1, 0), (1, -1), self.base_font_name),
+                    ('FONTNAME', (0, 0), (1, 0), self.bold_font_name),  # Make header row bold
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+                    ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                    ('ALIGN', (0, 0), (1, 0), 'CENTER'),  # Center the header
+                    ('SPAN', (0, 0), (1, 0)),  # Span the header across both columns
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                    ('BACKGROUND', (0, 1), (0, -1), colors.lightgrey),
+                    ('BACKGROUND', (0, 0), (1, 0), colors.lightgrey),  # Header background
+                ]))
+
+                elements.append(buy_table)
+                elements.append(Spacer(1, 0.2 * cm))
+
+                total_cost_pln += match.cost_pln
+                total_income_pln += match.income_pln
+
+            # Final calculation for this sell transaction
+            profit_loss_pln = total_income_pln - total_cost_pln
+            profit_percent = (profit_loss_pln / total_cost_pln * 100) if total_cost_pln > 0 else Decimal('0')
+
+            elements.append(Spacer(1, 0.3 * cm))
+            elements.append(Paragraph("Podsumowanie rozliczenia transakcji:", self.styles['ReportBodyText']))
+
+            summary_data = [
+                ["Przychód (PLN):", self.format_currency(total_income_pln)],
+                ["Koszt uzyskania przychodu (PLN):", self.format_currency(total_cost_pln)],
+                ["Dochód / Strata (PLN):", self.format_currency(profit_loss_pln)],
+                ["Procentowy zysk / strata:", f"{self.format_decimal(profit_percent, decimals=2)}%"],
+            ]
+
+            # Create summary table
+            summary_table = Table(summary_data, colWidths=[7 * cm, 8 * cm])
+            summary_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (0, -1), self.bold_font_name),
+                ('FONTNAME', (1, 0), (1, -1), self.base_font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ]))
+
+            elements.append(summary_table)
+
+            # Add space between transactions
+            elements.append(Spacer(1, 1 * cm))
+
+            # Add page break after set number of transactions or for the last transaction
+            if section_idx % 2 == 0 or section_idx == len(sorted_sell_keys):
+                elements.append(PageBreak())
 
         return elements
 
