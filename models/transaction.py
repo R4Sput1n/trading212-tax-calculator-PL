@@ -21,6 +21,9 @@ class Transaction(ABC):
     total_value_pln: Optional[Decimal] = None
     fees_foreign: Optional[Decimal] = None
     fees_pln: Optional[Decimal] = None
+    currency_conversion_fee_pln: Optional[Decimal] = None
+    transaction_tax_pln: Optional[Decimal] = None
+    other_fees_pln: Optional[Decimal] = None
     country: Optional[str] = None
     raw_data: Optional[Dict[str, Any]] = None
     
@@ -94,3 +97,11 @@ class FifoMatchResult:
     buy_date: datetime
     country: str
     ticker: str
+    buy_price_pln: Decimal
+    sell_price_pln: Decimal
+    buy_currency_conversion_fee_pln: Decimal
+    buy_transaction_tax_pln: Decimal
+    buy_other_fees_pln: Decimal
+    sell_currency_conversion_fee_pln: Decimal
+    sell_transaction_tax_pln: Decimal
+    sell_other_fees_pln: Decimal

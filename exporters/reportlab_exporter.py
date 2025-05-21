@@ -19,6 +19,8 @@ from exporters.exporter_interface import ExporterInterface
 from calculators.fifo_calculator import FifoCalculationResult
 from calculators.dividend_calculator import DividendCalculationResult
 
+logger = logging.getLogger(__name__)
+
 
 class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
     """Exporter for tax calculation results to PDF report using ReportLab"""
@@ -143,15 +145,29 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             encoding='utf-8'
         ))
 
+        self.styles.add(ParagraphStyle(
+            name='TableHeader',
+            parent=self.styles['Normal'],
+            fontName=self.bold_font_name,
+            fontSize=8,
+            alignment=TA_CENTER,
+            leading=10,
+            spaceAfter=0,
+            spaceBefore=0,
+            encoding='utf-8'
+        ))
+
         # Table header style
         self.table_header_style = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+            ('TOPPADDING', (0, 0), (-1, 0), 5),  # Add top padding for header cells
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),  # Vertically align header text to middle
         ])
 
         # Table data style
@@ -174,6 +190,10 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ])
+
+    def _create_wrapped_header_cell(self, text):
+        """Create a Paragraph object with wrapping for table headers"""
+        return Paragraph(text, self.styles['TableHeader'])
 
     def format_decimal(self, value: Decimal, decimals: int = 2) -> str:
         """
@@ -412,8 +432,18 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             elements.append(Paragraph("1.2 Transakcje zakupu", self.styles['ReportSection']))
 
             # Table header
-            buy_header = ["Data", "Ticker", "Nazwa", "Ilość", "Cena", "Waluta", "Kurs NBP",
-                          "Wartość w walucie", "Wartość w PLN", "Opłaty w PLN"]
+            buy_header = [
+                self._create_wrapped_header_cell("Data"),
+                self._create_wrapped_header_cell("Ticker"),
+                self._create_wrapped_header_cell("Nazwa"),
+                self._create_wrapped_header_cell("Ilość"),
+                self._create_wrapped_header_cell("Cena"),
+                self._create_wrapped_header_cell("Waluta"),
+                self._create_wrapped_header_cell("Kurs NBP"),
+                self._create_wrapped_header_cell("Wartość w walucie"),
+                self._create_wrapped_header_cell("Wartość w PLN"),
+                self._create_wrapped_header_cell("Opłaty w PLN")
+            ]
 
             # Calculate column widths based on content
             col_widths = [
@@ -642,10 +672,16 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         # Add section for each sell transaction
         for section_idx, sell_key in enumerate(sorted_sell_keys, 1):
             ticker, sell_date = sell_key
-            matches = sell_transactions[sell_key]
+            matches_for_this_sell = sell_transactions[sell_key]
 
             # Get the sell transaction from the first match (all matches in this group have the same sell transaction)
-            sell_tx = matches[0].sell_transaction
+            # Get the first match just to reference the transaction details
+            first_match = matches_for_this_sell[0]
+            sell_tx = first_match.sell_transaction
+
+            logger.info(f"Creating detailed section for {ticker} ({self.format_date(sell_date)})")
+            logger.info(f"  Sell transaction total fees: {sell_tx.fees_pln}")
+            logger.info(f"  Sell transaction currency conversion fee: {sell_tx.currency_conversion_fee_pln}")
 
             # Section title
             elements.append(Paragraph(f"1.5.{section_idx} Szczegóły dla {ticker} ({self.format_date(sell_date)})",
@@ -662,7 +698,8 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 ["Wartość sprzedaży w walucie:",
                  f"{self.format_currency(sell_tx.total_value_foreign)} {sell_tx.currency}"],
                 ["Wartość sprzedaży w PLN:", f"{self.format_currency(sell_tx.total_value_pln)} PLN"],
-                ["Opłaty przy sprzedaży:", f"{self.format_currency(sell_tx.fees_pln or Decimal('0'))} PLN"]
+                ["Koszt przewalutowania przy sprzedaży:",
+                 f"{self.format_currency(first_match.sell_currency_conversion_fee_pln)} PLN"]
             ]
 
             # Add spacer
@@ -692,20 +729,27 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             total_cost_pln = Decimal('0')
             total_income_pln = Decimal('0')
 
-            for idx, match in enumerate(sorted(matches, key=lambda m: m.buy_date), 1):
-                # Buy transaction details
-                buy_tx = match.buy_transaction
+            for idx, buy_match in enumerate(sorted(matches_for_this_sell, key=lambda m: m.buy_date), 1):
+                # Buy transaction
+                buy_tx = buy_match.buy_transaction
 
+                # Add debug logs
+                logger.debug(f"  Match #{idx} for {ticker}:")
+                logger.debug(f"    Buy currency conversion fee PLN: {buy_match.buy_currency_conversion_fee_pln}")
+
+                # Create buy transaction details table
                 buy_details = [
                     ["Transakcja zakupu #" + str(idx), ""],
-                    ["Data zakupu:", self.format_date(match.buy_date)],
-                    ["Ilość dopasowanych akcji:", self.format_decimal(match.used_quantity)],
+                    ["Data zakupu:", self.format_date(buy_match.buy_date)],
+                    ["Ilość dopasowanych akcji:", self.format_decimal(buy_match.used_quantity)],
                     ["Cena zakupu (za akcję):", f"{self.format_decimal(buy_tx.price_per_share)} {buy_tx.currency}"],
                     ["Kurs NBP dla zakupu:", self.format_decimal(buy_tx.exchange_rate)],
                     ["Wartość zakupu w walucie (dla dopasowanych akcji):",
-                     f"{self.format_currency(buy_tx.price_per_share * match.used_quantity)} {buy_tx.currency}"],
+                     f"{self.format_currency(buy_tx.price_per_share * buy_match.used_quantity)} {buy_tx.currency}"],
                     ["Wartość zakupu w PLN (dla dopasowanych akcji):",
-                     f"{self.format_currency(match.cost_pln)} PLN"],
+                     f"{self.format_currency(buy_match.buy_price_pln)} PLN"],
+                    ["Koszt przewalutowania przy kupnie:",
+                     f"{self.format_currency(buy_match.buy_currency_conversion_fee_pln)} PLN"]
                 ]
 
                 # Create table
@@ -739,6 +783,16 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             elements.append(Spacer(1, 0.3 * cm))
             elements.append(Paragraph("Podsumowanie rozliczenia transakcji:", self.styles['ReportBodyText']))
 
+            # Get the specific matches for this sell transaction
+            matches_for_this_sell = sell_transactions[sell_key]
+
+            # Calculate the summary data for just this transaction
+            total_income_pln = sum(m.income_pln for m in matches_for_this_sell)
+            total_cost_pln = sum(m.cost_pln for m in matches_for_this_sell)
+            profit_loss_pln = total_income_pln - total_cost_pln
+            profit_percent = (profit_loss_pln / total_cost_pln * 100) if total_cost_pln > 0 else Decimal('0')
+
+            # Create the summary table
             summary_data = [
                 ["Przychód (PLN):", self.format_currency(total_income_pln)],
                 ["Koszt uzyskania przychodu (PLN):", self.format_currency(total_cost_pln)],
@@ -1241,6 +1295,10 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                 topMargin=2 * cm,
                 bottomMargin=2 * cm
             )
+
+            doc.title = "Trading212 Tax Calculator Report"
+            doc.author = "Trading212 Tax Calculator"
+            doc.subject = "Tax Report"
 
             # List to store PDF elements
             elements = []

@@ -67,18 +67,30 @@ class Portfolio:
             
             # Calculate the ratio of sold shares to purchased shares
             ratio = shares_from_purchase / oldest_purchase.quantity
-            
-            # Calculate the income, cost, and profit/loss
+            sale_ratio = shares_from_purchase / sale.quantity
+
+            # Calculate the income and purchase cost (without fees)
             income_pln = shares_from_purchase * sale_value_per_share_pln
-            
-            # Cost includes both purchase price and fees
             purchase_cost = (oldest_purchase.total_value_pln * ratio)
-            purchase_fees = (oldest_purchase.fees_pln or Decimal(0)) * ratio
-            sale_fees = (sale.fees_pln or Decimal(0)) * (shares_from_purchase / sale.quantity)
-            
+
+            # Calculate detailed buy fees
+            buy_currency_conversion_fee = (oldest_purchase.currency_conversion_fee_pln or Decimal('0')) * ratio
+            buy_transaction_tax = (oldest_purchase.transaction_tax_pln or Decimal('0')) * ratio
+            buy_other_fees = (oldest_purchase.other_fees_pln or Decimal('0')) * ratio
+
+            # Calculate detailed sell fees
+            sell_currency_conversion_fee = (sale.currency_conversion_fee_pln or Decimal('0')) * sale_ratio
+            sell_transaction_tax = (sale.transaction_tax_pln or Decimal('0')) * sale_ratio
+            sell_other_fees = (sale.other_fees_pln or Decimal('0')) * sale_ratio
+
+            # Calculate total fees
+            purchase_fees = buy_currency_conversion_fee + buy_transaction_tax + buy_other_fees
+            sale_fees = sell_currency_conversion_fee + sell_transaction_tax + sell_other_fees
+
+            # Calculate total cost and profit/loss
             total_cost = purchase_cost + purchase_fees + sale_fees
             profit_loss = income_pln - total_cost
-            
+
             # Create a FIFO match result
             result = FifoMatchResult(
                 sell_transaction=sale,
@@ -90,7 +102,16 @@ class Portfolio:
                 sell_date=sale.date,
                 buy_date=oldest_purchase.date,
                 country=sale.country or "Unknown",
-                ticker=ticker
+                ticker=ticker,
+                # Add the new fields
+                buy_price_pln=purchase_cost,
+                sell_price_pln=income_pln,
+                buy_currency_conversion_fee_pln=buy_currency_conversion_fee,
+                buy_transaction_tax_pln=buy_transaction_tax,
+                buy_other_fees_pln=buy_other_fees,
+                sell_currency_conversion_fee_pln=sell_currency_conversion_fee,
+                sell_transaction_tax_pln=sell_transaction_tax,
+                sell_other_fees_pln=sell_other_fees
             )
             
             results.append(result)
@@ -107,8 +128,12 @@ class Portfolio:
             logger.info(f"FIFO result for {sale.ticker}:")
             logger.info(f"  Income in PLN: {income_pln}")
             logger.info(f"  Purchase cost in PLN: {purchase_cost}")
-            logger.info(f"  Purchase fees in PLN: {purchase_fees}")
-            logger.info(f"  Sale fees in PLN: {sale_fees}")
+            logger.info(f"  Buy currency conversion fee: {buy_currency_conversion_fee}")
+            logger.info(f"  Buy transaction tax: {buy_transaction_tax}")
+            logger.info(f"  Buy other fees: {buy_other_fees}")
+            logger.info(f"  Sell currency conversion fee: {sell_currency_conversion_fee}")
+            logger.info(f"  Sell transaction tax: {sell_transaction_tax}")
+            logger.info(f"  Sell other fees: {sell_other_fees}")
             logger.info(f"  Total cost in PLN: {total_cost}")
             logger.info(f"  Profit/Loss in PLN: {profit_loss}")
         
