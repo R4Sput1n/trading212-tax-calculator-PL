@@ -20,6 +20,8 @@ from calculators.dividend_calculator import DividendCalculator
 from exporters.tax_form_exporter import TaxFormGenerator, TaxFormExporter
 from models.transaction import Transaction
 from utils.logging_config import configure_logging
+from exporters.reportlab_exporter import ReportLabExporter
+from utils.env_config import load_personal_data
 
 
 def parse_arguments():
@@ -44,6 +46,15 @@ def parse_arguments():
 
     parser.add_argument('-y', '--year', type=int, default=None,
                         help='Tax year to calculate (default: all years)')
+
+    parser.add_argument('--latex-report', action='store_true', default=True,
+                        help='Generate LaTeX report (default: enabled)')
+
+    parser.add_argument('--env-file', type=str, default='.env',
+                        help='Path to .env file with personal data (default: .env)')
+
+    parser.add_argument('--compile-latex', action='store_true', default=True,
+                        help='Compile LaTeX report to PDF (default: enabled)')
     
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose output')
@@ -183,7 +194,7 @@ def calculation_mode(args, services, transactions=None):
     else:
         report_path = args.report
 
-    # Export tax form data
+    # Export tax form data to Excel
     os.makedirs(os.path.dirname(os.path.abspath(report_path)), exist_ok=True)
     tax_form_exporter = TaxFormExporter()
     success = tax_form_exporter.export(tax_form_data, report_path)
@@ -215,6 +226,29 @@ def calculation_mode(args, services, transactions=None):
     else:
         logger.error(f"Failed to save tax report to {report_path}")
         print(f"Calculation completed, but failed to save tax report to {report_path}")
+
+    if args.latex_report:
+        # Determine PDF report path
+        pdf_path = report_path
+        if '.' in pdf_path:
+            pdf_path = os.path.splitext(pdf_path)[0] + '.pdf'
+        else:
+            pdf_path = pdf_path + '.pdf'
+
+        # Load personal data
+        personal_data = load_personal_data(args.env_file)
+
+        # Create PDF exporter
+        pdf_exporter = ReportLabExporter(personal_data)
+
+        # Export data
+        pdf_data = {
+            'tax_year': args.year,
+            'fifo_result': fifo_result,
+            'dividend_result': dividend_result
+        }
+
+        pdf_exporter.export(pdf_data, pdf_path)
 
     return tax_form_data
 

@@ -99,9 +99,11 @@ class Trading212Parser(ParserInterface):
                 total_value_foreign = quantity * price
                 total_value_pln = total_value_foreign * exchange_rate if exchange_rate else None
 
-                # Calculate fees
                 fees_foreign = Decimal('0')
                 fees_pln = Decimal('0')
+                currency_conversion_fee_pln = Decimal('0')
+                transaction_tax_pln = Decimal('0')
+                other_fees_pln = Decimal('0')
 
                 # Handle Currency conversion fee
                 if pd.notna(row.get('Currency conversion fee')):
@@ -110,8 +112,11 @@ class Trading212Parser(ParserInterface):
 
                     if fee_currency == 'PLN':
                         fees_pln += fee_amount
+                        currency_conversion_fee_pln += fee_amount
                     else:
+                        fee_amount_pln = fee_amount * exchange_rate if exchange_rate else Decimal('0')
                         fees_foreign += fee_amount
+                        currency_conversion_fee_pln += fee_amount_pln
 
                 # Handle French transaction tax
                 if pd.notna(row.get('French transaction tax')):
@@ -120,8 +125,11 @@ class Trading212Parser(ParserInterface):
 
                     if tax_currency == 'PLN':
                         fees_pln += tax_amount
+                        transaction_tax_pln += tax_amount
                     else:
+                        tax_amount_pln = tax_amount * exchange_rate if exchange_rate else Decimal('0')
                         fees_foreign += tax_amount
+                        transaction_tax_pln += tax_amount_pln
 
                 # Convert foreign fees to PLN
                 if fees_foreign > 0 and exchange_rate:
@@ -150,6 +158,9 @@ class Trading212Parser(ParserInterface):
                         total_value_pln=total_value_pln,
                         fees_foreign=fees_foreign,
                         fees_pln=fees_pln,
+                        currency_conversion_fee_pln=currency_conversion_fee_pln,
+                        transaction_tax_pln=transaction_tax_pln,
+                        other_fees_pln=other_fees_pln,
                         country=country,
                         raw_data=row.to_dict()
                     )
@@ -168,6 +179,9 @@ class Trading212Parser(ParserInterface):
                         total_value_foreign=total_value_foreign,
                         total_value_pln=total_value_pln,
                         fees_foreign=fees_foreign,
+                        currency_conversion_fee_pln=currency_conversion_fee_pln,
+                        transaction_tax_pln=transaction_tax_pln,
+                        other_fees_pln=other_fees_pln,
                         fees_pln=fees_pln,
                         country=country,
                         raw_data=row.to_dict()
@@ -195,6 +209,9 @@ class Trading212Parser(ParserInterface):
                         total_value_pln=total_value_pln,
                         fees_foreign=fees_foreign,
                         fees_pln=fees_pln,
+                        currency_conversion_fee_pln=currency_conversion_fee_pln,
+                        transaction_tax_pln=transaction_tax_pln,
+                        other_fees_pln=other_fees_pln,
                         country=country,
                         withholding_tax_foreign=withholding_tax_foreign,
                         withholding_tax_pln=withholding_tax_pln,
