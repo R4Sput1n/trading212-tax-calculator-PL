@@ -1,8 +1,16 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
-import yfinance as yf
+import logging
+
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
 
 from services.isin_service import ISINService
+
+logger = logging.getLogger(__name__)
 
 
 class CompanyInfoService(ABC):
@@ -52,6 +60,16 @@ class YFinanceCompanyInfoService(CompanyInfoService):
         if isin in self._cache:
             return self._cache[isin]
         
+        if not YFINANCE_AVAILABLE:
+            # Fall back to ISIN lookup
+            isin_country = self.isin_service.get_country_from_isin(isin)
+            if isin_country:
+                country = f"{isin_country} (from ISIN)"
+                self._cache[isin] = country
+                return country
+            self._cache[isin] = "Unknown"
+            return "Unknown"
+        
         try:
             # Use ISIN as ticker
             stock = yf.Ticker(isin)
@@ -79,7 +97,7 @@ class YFinanceCompanyInfoService(CompanyInfoService):
                     
                     return "Unknown"
         except Exception as e:
-            print(f"Could not determine country for {isin} ({name}): {e}")
+            logger.debug(f"Could not determine country for {isin} ({name}): {e}")
             
             # Fall back to ISIN country lookup
             isin_country = self.isin_service.get_country_from_isin(isin)

@@ -125,16 +125,16 @@ class Portfolio:
             remaining_shares -= shares_from_purchase
 
             logger = logging.getLogger(__name__)
-            logger.info(f"FIFO result for {sale.ticker}:")
-            logger.info(f"  Income in PLN: {income_pln}")
-            logger.info(f"  Purchase cost in PLN: {purchase_cost}")
-            logger.info(f"  Buy currency conversion fee: {buy_currency_conversion_fee}")
-            logger.info(f"  Buy transaction tax: {buy_transaction_tax}")
-            logger.info(f"  Buy other fees: {buy_other_fees}")
-            logger.info(f"  Sell currency conversion fee: {sell_currency_conversion_fee}")
-            logger.info(f"  Sell transaction tax: {sell_transaction_tax}")
-            logger.info(f"  Sell other fees: {sell_other_fees}")
-            logger.info(f"  Total cost in PLN: {total_cost}")
-            logger.info(f"  Profit/Loss in PLN: {profit_loss}")
+            logger.debug(f"FIFO result for {sale.ticker}:")
+            logger.debug(f"  Income in PLN: {income_pln}")
+            logger.debug(f"  Purchase cost in PLN: {purchase_cost}")
+            logger.debug(f"  Buy currency conversion fee: {buy_currency_conversion_fee}")
+            logger.debug(f"  Buy transaction tax: {buy_transaction_tax}")
+            logger.debug(f"  Buy other fees: {buy_other_fees}")
+            logger.debug(f"  Sell currency conversion fee: {sell_currency_conversion_fee}")
+            logger.debug(f"  Sell transaction tax: {sell_transaction_tax}")
+            logger.debug(f"  Sell other fees: {sell_other_fees}")
+            logger.debug(f"  Total cost in PLN: {total_cost}")
+            logger.debug(f"  Profit/Loss in PLN: {profit_loss}")
         
         return results

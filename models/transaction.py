@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
@@ -82,6 +82,14 @@ class DividendTransaction(Transaction):
             raise ValueError("Exchange rate is required to calculate PLN value")
         
         return self.calculate_net_dividend_foreign() * self.exchange_rate
+
+
+@dataclass
+class InterestTransaction(Transaction):
+    """Class representing an interest on cash transaction"""
+    
+    def get_transaction_type(self) -> str:
+        return "INTEREST"
 
 
 @dataclass
