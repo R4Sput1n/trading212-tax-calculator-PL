@@ -1,10 +1,13 @@
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 import pandas as pd
+import logging
 
 from models.transaction import Transaction, BuyTransaction, SellTransaction, FifoMatchResult
 from models.portfolio import Portfolio
 from calculators.calculator_interface import CalculatorInterface
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,6 +45,7 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
     def validate(self, transactions: List[Transaction]) -> List[str]:
         """
         Validate transaction data before FIFO calculation.
+        Only validates BUY and SELL transactions since those are what FIFO processes.
         
         Args:
             transactions: List of transactions to validate
@@ -56,12 +60,17 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
             issues.append("No transactions to process")
             return issues
         
+        # Filter to only BUY and SELL transactions for validation
+        buy_sell_transactions = [tx for tx in transactions 
+                                  if isinstance(tx, (BuyTransaction, SellTransaction))]
+        
+        if not buy_sell_transactions:
+            # No buy/sell transactions is not necessarily an error
+            # (might just be dividends/interest)
+            return issues
+        
         # Check for transactions with missing required data
-        for i, tx in enumerate(transactions):
-            if not hasattr(tx, 'get_transaction_type'):
-                issues.append(f"Transaction #{i} is not a valid Transaction object")
-                continue
-                
+        for i, tx in enumerate(buy_sell_transactions):
             if tx.ticker == '':
                 issues.append(f"Transaction #{i} ({tx.get_transaction_type()}) has no ticker")
             
@@ -87,10 +96,17 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
         Returns:
             FifoCalculationResult with calculation results
         """
-        # Validate input data
+        # Validate input data (collects warnings but doesn't stop processing)
         issues = self.validate(transactions)
-        if issues:
-            return FifoCalculationResult(issues=issues)
+        
+        # Count transaction types for debugging
+        buy_txs = [tx for tx in transactions if isinstance(tx, BuyTransaction)]
+        sell_txs = [tx for tx in transactions if isinstance(tx, SellTransaction)]
+        logger.info(f"FIFO Calculator: {len(transactions)} total, {len(buy_txs)} BUY, {len(sell_txs)} SELL")
+        
+        # Only return early if there are NO transactions at all
+        if not transactions:
+            return FifoCalculationResult(issues=issues if issues else ["No transactions to process"])
 
         # Statistics
         stats = {
@@ -108,6 +124,7 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
         sorted_transactions = sorted(transactions, key=lambda tx: tx.date)
 
         # Process transactions
+        skipped_sells = 0
         for tx in sorted_transactions:
             if isinstance(tx, BuyTransaction):
                 portfolio.add_transaction(tx)
@@ -116,6 +133,7 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
             elif isinstance(tx, SellTransaction):
                 # Skip this sale if it's not in the specified tax year
                 if tax_year is not None and tx.date.year != tax_year:
+                    skipped_sells += 1
                     continue
 
                 try:
@@ -126,6 +144,9 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
                     stats['fifo_match_count'] += len(sale_matches)
                 except ValueError as e:
                     issues.append(f"Error processing sale of {tx.ticker}: {str(e)}")
+                    logger.warning(f"FIFO error for {tx.ticker}: {e}")
+
+        logger.info(f"FIFO: {stats['buy_count']} buys added, {stats['sell_count']} sells processed, {skipped_sells} sells skipped (wrong year), {stats['fifo_match_count']} matches")
 
         # Create result
         result = FifoCalculationResult(

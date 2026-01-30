@@ -5,8 +5,11 @@ import requests
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from decimal import Decimal
+import logging
 
 from utils.date_utils import is_business_day, get_previous_business_day
+
+logger = logging.getLogger(__name__)
 
 
 class ExchangeRateService(ABC):
@@ -100,16 +103,16 @@ class NBPExchangeRateService(ExchangeRateService):
                     return rate
                 else:
                     # Try the previous business day
-                    print(f'Could not get exchange rate for day {prev_business_day} for currency {currency_code}')
+                    logger.debug(f'Could not get exchange rate for day {prev_business_day} for currency {currency_code}')
                     prev_business_day = get_previous_business_day(prev_business_day)
-                    print(f'Retrying for {prev_business_day}')
+                    logger.debug(f'Retrying for {prev_business_day}')
             except Exception as e:
-                print(f"Error getting exchange rate for attempt {attempt + 1}: {e}")
+                logger.error(f"Error getting exchange rate for attempt {attempt + 1}: {e}")
                 # Try the next day anyway
                 prev_business_day = get_previous_business_day(prev_business_day)
 
         # If we get here, we couldn't find a rate after all attempts
-        print(f"Could not get exchange rate for {original_currency} after {max_attempts} attempts")
+        logger.warning(f"Could not get exchange rate for {original_currency} after {max_attempts} attempts")
         return None
 
 

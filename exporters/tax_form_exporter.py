@@ -1,10 +1,11 @@
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from decimal import Decimal
 import pandas as pd
 from dataclasses import dataclass
 
 from calculators.fifo_calculator import FifoCalculationResult
 from calculators.dividend_calculator import DividendCalculationResult
+from calculators.interest_calculator import InterestCalculationResult
 from exporters.exporter_interface import ExporterInterface
 
 
@@ -21,6 +22,9 @@ class PIT38Summary:
     
     # Section G - Dividends
     dividend_data: List[Dict[str, Any]]
+    
+    # Interest data (separate tracking)
+    interest_data: Optional[Dict[str, Any]] = None
     
     def get_all_fields(self) -> Dict[str, Any]:
         """Get all fields for the tax form as a dictionary"""
@@ -43,6 +47,11 @@ class PIT38Summary:
             fields[f"G.45_{i}"] = float(div_data["tax_due"])
             fields[f"G.46_{i}"] = float(div_data["tax_paid_abroad"])
             fields[f"G.47_{i}"] = float(div_data["tax_to_pay"])
+        
+        # Add interest data if present
+        if self.interest_data:
+            fields["interest_total_pln"] = float(self.interest_data["total_interest_pln"])
+            fields["interest_tax_due"] = float(self.interest_data["tax_due"])
         
         return fields
 
@@ -88,6 +97,10 @@ class TaxFormExporter(ExporterInterface[TaxFormData]):
                 # PIT-38 - Dividends
                 self._export_pit38_dividends(data.pit38, writer)
                 
+                # PIT-38 - Interest (if any)
+                if data.pit38.interest_data:
+                    self._export_pit38_interest(data.pit38, writer)
+                
                 # PIT/ZG
                 self._export_pitzg(data.pitzg, writer)
             
@@ -108,7 +121,7 @@ class TaxFormExporter(ExporterInterface[TaxFormData]):
              "WARTOŚĆ": float(pit38.total_cost)},
             {"KOMÓRKA": "C.26", "NAZWA": "Dochód (b-c)", "WARTOŚĆ": float(pit38.profit)},
             {"KOMÓRKA": "C.27", "NAZWA": "Strata (b-c)", "WARTOŚĆ": float(pit38.loss)},
-            {"KOMÓRKA": "D.29", "NAZWA": "Podstawa obliczenia podatku (po zaokrągleniu do pełych złotch)",
+            {"KOMÓRKA": "D.29", "NAZWA": "Podstawa obliczenia podatku (po zaokrągleniu do pełnych złotych)",
              "WARTOŚĆ": pit38.tax_base},
             {"KOMÓRKA": "D.31", "NAZWA": "Podatek dochodowy o którym mowa w art. 30b ustawy",
              "WARTOŚĆ": pit38.tax_due},
@@ -116,7 +129,7 @@ class TaxFormExporter(ExporterInterface[TaxFormData]):
              "WARTOŚĆ": pit38.tax_due}
         ]
         
-        pd.DataFrame(securities_data).to_excel(writer, sheet_name='PIT-38 - Akcje i Koszty', index=False)
+        pd.DataFrame(securities_data).to_excel(writer, sheet_name='PIT-38 - Akcje', index=False)
     
     def _export_pit38_dividends(self, pit38: PIT38Summary, writer) -> None:
         """Export PIT-38 dividend data to Excel worksheet"""
@@ -139,30 +152,64 @@ class TaxFormExporter(ExporterInterface[TaxFormData]):
             tax_to_pay = Decimal(str(div["tax_to_pay"]))
             
             dividend_data.append({
+                "KOMÓRKA": f"G.43-G.47 ({country})",
+                "NAZWA": f"Dywidendy z {country}",
+                "WARTOŚĆ": float(div["dividend_amount"])
+            })
+            
+            dividend_data.append({
                 "KOMÓRKA": "G.45",
-                "NAZWA": "Zryczałtowany podatek obliczony od przychodów (dochodów), o których mowa w art. 30a ust. 1 pkt 1–5 ustawy, uzyskanych poza granicami Rzeczypospolitej Polskiej",
+                "NAZWA": f"Zryczałtowany podatek obliczony (19%) - {country}",
                 "WARTOŚĆ": float(tax_due)
             })
             
             dividend_data.append({
                 "KOMÓRKA": "G.46",
-                "NAZWA": "Podatek zapłacony za granicą, o którym mowa w art. 30a ust. 9 ustawy (przeliczony na złote)",
+                "NAZWA": f"Podatek zapłacony za granicą - {country}",
                 "WARTOŚĆ": float(tax_paid)
             })
             
             dividend_data.append({
-                "KOMÓRKA": "-",
-                "NAZWA": "Dokładna wartość podatku do dopłacenia (wiersz pomocniczy)",
-                "WARTOŚĆ": float(tax_due - tax_paid)
-            })
-            
-            dividend_data.append({
                 "KOMÓRKA": "G.47",
-                "NAZWA": "Różnica między zryczałtowanym podatkiem a podatkiem zapłaconym za granicą",
+                "NAZWA": f"Różnica (do zapłaty w Polsce) - {country}",
                 "WARTOŚĆ": float(tax_to_pay)
             })
         
         pd.DataFrame(dividend_data).to_excel(writer, sheet_name='PIT-38 - Dywidendy', index=False)
+    
+    def _export_pit38_interest(self, pit38: PIT38Summary, writer) -> None:
+        """Export PIT-38 interest data to Excel worksheet"""
+        if not pit38.interest_data:
+            return
+        
+        interest_data = [
+            {
+                "KOMÓRKA": "-",
+                "NAZWA": "Odsetki od środków pieniężnych (Interest on cash)",
+                "WARTOŚĆ": float(pit38.interest_data["total_interest_pln"])
+            },
+            {
+                "KOMÓRKA": "-",
+                "NAZWA": "Podatek należny od odsetek (19%)",
+                "WARTOŚĆ": float(pit38.interest_data["tax_due"])
+            },
+            {
+                "KOMÓRKA": "-",
+                "NAZWA": "Uwaga: Odsetki należy wykazać w odpowiedniej sekcji PIT-38 lub PIT-36",
+                "WARTOŚĆ": ""
+            }
+        ]
+        
+        # Add breakdown by currency if available
+        if "by_currency" in pit38.interest_data:
+            for currency, amount in pit38.interest_data["by_currency"].items():
+                interest_data.append({
+                    "KOMÓRKA": "-",
+                    "NAZWA": f"Odsetki w walucie {currency}",
+                    "WARTOŚĆ": float(amount)
+                })
+        
+        pd.DataFrame(interest_data).to_excel(writer, sheet_name='PIT-38 - Odsetki', index=False)
     
     def _export_pitzg(self, pitzg_data: List[PITZGData], writer) -> None:
         """Export PIT/ZG data to Excel worksheet"""
@@ -198,7 +245,8 @@ class TaxFormGenerator:
     def generate_tax_forms(
         self, 
         fifo_result: FifoCalculationResult, 
-        dividend_result: DividendCalculationResult
+        dividend_result: DividendCalculationResult,
+        interest_result: Optional[InterestCalculationResult] = None
     ) -> TaxFormData:
         """
         Generate tax form data from calculation results.
@@ -206,12 +254,13 @@ class TaxFormGenerator:
         Args:
             fifo_result: Result of FIFO calculation
             dividend_result: Result of dividend calculation
+            interest_result: Result of interest calculation (optional)
             
         Returns:
             TaxFormData with data for PIT-38 and PIT/ZG forms
         """
         # Generate PIT-38 summary
-        pit38 = self._generate_pit38_summary(fifo_result, dividend_result)
+        pit38 = self._generate_pit38_summary(fifo_result, dividend_result, interest_result)
         
         # Generate PIT/ZG data
         pitzg = self._generate_pitzg_data(fifo_result, dividend_result)
@@ -221,7 +270,8 @@ class TaxFormGenerator:
     def _generate_pit38_summary(
         self, 
         fifo_result: FifoCalculationResult, 
-        dividend_result: DividendCalculationResult
+        dividend_result: DividendCalculationResult,
+        interest_result: Optional[InterestCalculationResult] = None
     ) -> PIT38Summary:
         """Generate PIT-38 summary from calculation results"""
         # Calculate securities totals
@@ -259,6 +309,19 @@ class TaxFormGenerator:
                 "tax_to_pay": summary.tax_to_pay
             })
         
+        # Prepare interest data
+        interest_data = None
+        if interest_result and interest_result.total_interest_pln > 0:
+            by_currency = {}
+            for currency, summary in interest_result.summaries.items():
+                by_currency[currency] = summary.total_interest_pln
+            
+            interest_data = {
+                "total_interest_pln": interest_result.total_interest_pln,
+                "tax_due": interest_result.total_tax_due,
+                "by_currency": by_currency
+            }
+        
         return PIT38Summary(
             total_income=total_income,
             total_cost=total_cost,
@@ -266,7 +329,8 @@ class TaxFormGenerator:
             loss=loss,
             tax_base=tax_base,
             tax_due=tax_due,
-            dividend_data=dividend_data
+            dividend_data=dividend_data,
+            interest_data=interest_data
         )
     
     def _generate_pitzg_data(
