@@ -4,81 +4,116 @@ Trading212 Tax Calculator - Main Module
 
 A tool for calculating taxes for Trading212 transactions in Poland.
 """
+
 import argparse
 import logging
 import os
 import sys
-from typing import List, Optional
 
-from config.settings import settings
-from parsers.trading212_parser import Trading212Parser
-from services.exchange_rate_service import NBPExchangeRateService
-from services.company_info_service import YFinanceCompanyInfoService
-from services.isin_service import DefaultISINService
-from calculators.fifo_calculator import FifoCalculator
 from calculators.dividend_calculator import DividendCalculator
+from calculators.fifo_calculator import FifoCalculator
 from calculators.interest_calculator import InterestCalculator
-from exporters.tax_form_exporter import TaxFormGenerator, TaxFormExporter
-from models.transaction import Transaction
-from utils.logging_config import configure_logging
+from config.settings import settings
 from exporters.reportlab_exporter import ReportLabExporter
+from exporters.tax_form_exporter import TaxFormExporter, TaxFormGenerator
+from parsers.trading212_parser import Trading212Parser
 from utils.env_config import load_personal_data
+from utils.logging_config import configure_logging
 
 
 def parse_arguments():
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description=f'{settings.APP_NAME} {settings.APP_VERSION}')
-    
-    parser.add_argument('-m', '--mode',
-                        choices=['processing', 'calculation', 'all'],
-                        default='processing',
-                        help='Operating mode: processing for CSV files processing, '
-                             'calculation for tax calculations, '
-                             'all for both without interruption')
-    
-    parser.add_argument('-i', '--input', type=str, default=None,
-                        help='Path to input file or directory with CSV files')
-    
-    parser.add_argument('-o', '--output', type=str, default=settings.DEFAULT_PROCESSED_FILE,
-                        help=f'Path to output file (for processing mode, default: {settings.DEFAULT_PROCESSED_FILE})')
-    
-    parser.add_argument('-r', '--report', type=str, default=settings.DEFAULT_REPORT_FILE,
-                        help=f'Path to tax report file (for calculation mode, default: {settings.DEFAULT_REPORT_FILE})')
+    parser = argparse.ArgumentParser(description=f"{settings.APP_NAME} {settings.APP_VERSION}")
 
-    parser.add_argument('-y', '--year', type=int, default=None,
-                        help='Tax year to calculate (default: all years)')
+    parser.add_argument(
+        "-m",
+        "--mode",
+        choices=["processing", "calculation", "all"],
+        default="processing",
+        help="Operating mode: processing for CSV files processing, "
+        "calculation for tax calculations, "
+        "all for both without interruption",
+    )
 
-    parser.add_argument('--pdf-report', action='store_true', default=True,
-                        help='Generate PDF report (default: enabled)')
-    
-    parser.add_argument('--no-pdf', action='store_true', default=False,
-                        help='Disable PDF report generation')
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        default=None,
+        help="Path to input file or directory with CSV files",
+    )
 
-    parser.add_argument('--env-file', type=str, default='.env',
-                        help='Path to .env file with personal data (default: .env)')
-    
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help='Enable verbose output')
-    
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=settings.DEFAULT_PROCESSED_FILE,
+        help=f"Path to output file (for processing mode, default: {settings.DEFAULT_PROCESSED_FILE})",
+    )
+
+    parser.add_argument(
+        "-r",
+        "--report",
+        type=str,
+        default=settings.DEFAULT_REPORT_FILE,
+        help=f"Path to tax report file (for calculation mode, default: {settings.DEFAULT_REPORT_FILE})",
+    )
+
+    parser.add_argument(
+        "-y", "--year", type=int, default=None, help="Tax year to calculate (default: all years)"
+    )
+
+    parser.add_argument(
+        "--pdf-report",
+        action="store_true",
+        default=True,
+        help="Generate PDF report (default: enabled)",
+    )
+
+    parser.add_argument(
+        "--no-pdf", action="store_true", default=False, help="Disable PDF report generation"
+    )
+
+    parser.add_argument(
+        "--env-file",
+        type=str,
+        default=".env",
+        help="Path to .env file with personal data (default: .env)",
+    )
+
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument(
+        "--font-path",
+        type=str,
+        default=None,
+        help="Path to a custom TTF font file for PDF reports (e.g., FiraCode Nerd Font)",
+    )
+    parser.add_argument(
+        "--font-name",
+        type=str,
+        default=None,
+        help="Name to register the custom font under (required if --font-path is set)",
+    )
     args = parser.parse_args()
-    
+
     # Handle PDF flag logic
     if args.no_pdf:
         args.pdf_report = False
-    
+
     # Set default input path if not provided
     if args.input is None:
-        if args.mode == 'processing':
+        if args.mode == "processing":
             args.input = os.path.join(settings.DEFAULT_DATA_DIR, "*.csv")
         else:
             args.input = settings.DEFAULT_PROCESSED_FILE
-    
+
     return args
 
 
 def setup_services():
     """Set up services for the application"""
     from services.service_factory import ServiceFactory
+
     return ServiceFactory.create_all_services()
 
 
@@ -89,15 +124,15 @@ def processing_mode(args, services):
 
     # Create parser
     parser = Trading212Parser(
-        exchange_rate_service=services['exchange_rate_service'],
-        company_info_service=services['company_info_service']
+        exchange_rate_service=services["exchange_rate_service"],
+        company_info_service=services["company_info_service"],
     )
 
     # Parse files
     if os.path.isdir(args.input):
         input_path = os.path.join(args.input, "*.csv")
         transactions = parser.parse_glob(input_path)
-    elif '*' in args.input:
+    elif "*" in args.input:
         transactions = parser.parse_glob(args.input)
     elif os.path.isfile(args.input):
         transactions = parser.parse_file(args.input)
@@ -106,7 +141,7 @@ def processing_mode(args, services):
         sys.exit(1)
 
     logger.info(f"Parsed {len(transactions)} transactions")
-    
+
     # Log transaction type breakdown
     tx_types = {}
     for tx in transactions:
@@ -119,54 +154,54 @@ def processing_mode(args, services):
 
     # Define the columns we want in the processed CSV (in order)
     columns = [
-        'action',  # NEW: Transaction type (BUY, SELL, DIVIDEND, INTEREST)
-        'date',
-        'ticker',
-        'symbol',
-        'isin',
-        'name',
-        'quantity',
-        'price_per_share',
-        'currency',
-        'exchange_rate',
-        'total_value_foreign',
-        'total_value_pln',
-        'fees_foreign',
-        'fees_pln',
-        'currency_conversion_fee_pln',
-        'transaction_tax_pln',
-        'other_fees_pln',
-        'country',
-        'withholding_tax_foreign',
-        'withholding_tax_pln',
-        'raw_data',
+        "action",  # NEW: Transaction type (BUY, SELL, DIVIDEND, INTEREST)
+        "date",
+        "ticker",
+        "symbol",
+        "isin",
+        "name",
+        "quantity",
+        "price_per_share",
+        "currency",
+        "exchange_rate",
+        "total_value_foreign",
+        "total_value_pln",
+        "fees_foreign",
+        "fees_pln",
+        "currency_conversion_fee_pln",
+        "transaction_tax_pln",
+        "other_fees_pln",
+        "country",
+        "withholding_tax_foreign",
+        "withholding_tax_pln",
+        "raw_data",
     ]
 
     # Build data with explicit column handling
     data = []
     for tx in transactions:
         row = {
-            'action': tx.get_transaction_type(),  # NEW: Add action column
-            'date': tx.date,
-            'ticker': tx.ticker,
-            'symbol': tx.symbol,
-            'isin': tx.isin,
-            'name': tx.name,
-            'quantity': tx.quantity,
-            'price_per_share': tx.price_per_share,
-            'currency': tx.currency,
-            'exchange_rate': tx.exchange_rate,
-            'total_value_foreign': tx.total_value_foreign,
-            'total_value_pln': tx.total_value_pln,
-            'fees_foreign': tx.fees_foreign,
-            'fees_pln': tx.fees_pln,
-            'currency_conversion_fee_pln': tx.currency_conversion_fee_pln,
-            'transaction_tax_pln': tx.transaction_tax_pln,
-            'other_fees_pln': tx.other_fees_pln,
-            'country': tx.country,
-            'withholding_tax_foreign': getattr(tx, 'withholding_tax_foreign', None),
-            'withholding_tax_pln': getattr(tx, 'withholding_tax_pln', None),
-            'raw_data': tx.raw_data,
+            "action": tx.get_transaction_type(),  # NEW: Add action column
+            "date": tx.date,
+            "ticker": tx.ticker,
+            "symbol": tx.symbol,
+            "isin": tx.isin,
+            "name": tx.name,
+            "quantity": tx.quantity,
+            "price_per_share": tx.price_per_share,
+            "currency": tx.currency,
+            "exchange_rate": tx.exchange_rate,
+            "total_value_foreign": tx.total_value_foreign,
+            "total_value_pln": tx.total_value_pln,
+            "fees_foreign": tx.fees_foreign,
+            "fees_pln": tx.fees_pln,
+            "currency_conversion_fee_pln": tx.currency_conversion_fee_pln,
+            "transaction_tax_pln": tx.transaction_tax_pln,
+            "other_fees_pln": tx.other_fees_pln,
+            "country": tx.country,
+            "withholding_tax_foreign": getattr(tx, "withholding_tax_foreign", None),
+            "withholding_tax_pln": getattr(tx, "withholding_tax_pln", None),
+            "raw_data": tx.raw_data,
         }
         data.append(row)
 
@@ -191,7 +226,9 @@ def calculation_mode(args, services, transactions=None):
     logger = logging.getLogger(__name__)
 
     tax_year_info = f" for tax year {args.year}" if args.year else ""
-    logger.info(f"Starting calculation mode{tax_year_info}, input: {args.input}, report: {args.report}")
+    logger.info(
+        f"Starting calculation mode{tax_year_info}, input: {args.input}, report: {args.report}"
+    )
 
     # If transactions not provided, load from input file
     if transactions is None:
@@ -201,19 +238,22 @@ def calculation_mode(args, services, transactions=None):
             sys.exit(1)
 
         import pandas as pd
+
         df = pd.read_csv(args.input)
 
         # Create parser
         parser = Trading212Parser(
-            exchange_rate_service=services['exchange_rate_service'],
-            company_info_service=services['company_info_service']
+            exchange_rate_service=services["exchange_rate_service"],
+            company_info_service=services["company_info_service"],
         )
 
         # Parse data
         transactions = parser.parse_data(df)
 
         if args.year:
-            logger.info(f"Loaded {len(transactions)} transactions, will filter sales/dividends for year {args.year}")
+            logger.info(
+                f"Loaded {len(transactions)} transactions, will filter sales/dividends for year {args.year}"
+            )
         else:
             logger.info(f"Loaded {len(transactions)} transactions (all years)")
 
@@ -245,12 +285,14 @@ def calculation_mode(args, services, transactions=None):
 
     # Generate tax form data
     tax_form_generator = TaxFormGenerator(tax_rate=float(settings.DEFAULT_TAX_RATE))
-    tax_form_data = tax_form_generator.generate_tax_forms(fifo_result, dividend_result, interest_result)
+    tax_form_data = tax_form_generator.generate_tax_forms(
+        fifo_result, dividend_result, interest_result
+    )
 
     # Include tax year in the report filename if specified
     if args.year:
         report_path = args.report
-        if '.' in report_path:
+        if "." in report_path:
             base, ext = os.path.splitext(report_path)
             report_path = f"{base}_{args.year}{ext}"
         else:
@@ -269,10 +311,10 @@ def calculation_mode(args, services, transactions=None):
         print(f"Calculation completed. Tax report{tax_year_str} saved to {report_path}")
 
         # Print summary
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("SUMMARY")
-        print("="*50)
-        
+        print("=" * 50)
+
         print("\nSECURITIES (FIFO):")
         print(f"  Income: {tax_form_data.pit38.total_income:.2f} PLN")
         print(f"  Costs: {tax_form_data.pit38.total_cost:.2f} PLN")
@@ -284,9 +326,9 @@ def calculation_mode(args, services, transactions=None):
 
         if tax_form_data.pit38.dividend_data:
             print("\nDIVIDENDS:")
-            total_div = sum(d['dividend_amount'] for d in tax_form_data.pit38.dividend_data)
-            total_tax_paid = sum(d['tax_paid_abroad'] for d in tax_form_data.pit38.dividend_data)
-            total_tax_to_pay = sum(d['tax_to_pay'] for d in tax_form_data.pit38.dividend_data)
+            total_div = sum(d["dividend_amount"] for d in tax_form_data.pit38.dividend_data)
+            total_tax_paid = sum(d["tax_paid_abroad"] for d in tax_form_data.pit38.dividend_data)
+            total_tax_to_pay = sum(d["tax_to_pay"] for d in tax_form_data.pit38.dividend_data)
             for div in tax_form_data.pit38.dividend_data:
                 print(f"  {div['country']}:")
                 print(f"    Dividend: {div['dividend_amount']:.2f} PLN")
@@ -295,12 +337,14 @@ def calculation_mode(args, services, transactions=None):
             print(f"  TOTAL dividends: {total_div:.2f} PLN")
             print(f"  TOTAL tax to pay: {total_tax_to_pay:.2f} PLN")
 
-        if hasattr(tax_form_data.pit38, 'interest_data') and tax_form_data.pit38.interest_data:
+        if hasattr(tax_form_data.pit38, "interest_data") and tax_form_data.pit38.interest_data:
             print("\nINTEREST ON CASH:")
-            print(f"  Total interest: {tax_form_data.pit38.interest_data['total_interest_pln']:.2f} PLN")
+            print(
+                f"  Total interest: {tax_form_data.pit38.interest_data['total_interest_pln']:.2f} PLN"
+            )
             print(f"  Tax due (19%): {tax_form_data.pit38.interest_data['tax_due']:.2f} PLN")
-        
-        print("\n" + "="*50)
+
+        print("\n" + "=" * 50)
     else:
         logger.error(f"Failed to save tax report to {report_path}")
         print(f"Calculation completed, but failed to save tax report to {report_path}")
@@ -308,23 +352,27 @@ def calculation_mode(args, services, transactions=None):
     if args.pdf_report:
         # Determine PDF report path
         pdf_path = report_path
-        if '.' in pdf_path:
-            pdf_path = os.path.splitext(pdf_path)[0] + '.pdf'
+        if "." in pdf_path:
+            pdf_path = os.path.splitext(pdf_path)[0] + ".pdf"
         else:
-            pdf_path = pdf_path + '.pdf'
+            pdf_path = pdf_path + ".pdf"
 
         # Load personal data
         personal_data = load_personal_data(args.env_file)
 
         # Create PDF exporter
-        pdf_exporter = ReportLabExporter(personal_data)
+        pdf_exporter = ReportLabExporter(
+            personal_data,
+            custom_font_path=args.font_path,
+            custom_font_name=args.font_name
+        )
 
         # Export data
         pdf_data = {
-            'tax_year': args.year,
-            'fifo_result': fifo_result,
-            'dividend_result': dividend_result,
-            'interest_result': interest_result
+            "tax_year": args.year,
+            "fifo_result": fifo_result,
+            "dividend_result": dividend_result,
+            "interest_result": interest_result,
         }
 
         pdf_exporter.export(pdf_data, pdf_path)
@@ -336,31 +384,31 @@ def main():
     """Main function"""
     # Parse arguments
     args = parse_arguments()
-    
+
     # Set up logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     configure_logging(log_level, log_file=settings.DEFAULT_LOG_FILE)
-    
+
     logger = logging.getLogger(__name__)
     logger.info(f"Starting {settings.APP_NAME} {settings.APP_VERSION}")
-    
+
     # Create default directories
     settings.init_directories()
-    
+
     # Setup services
     services = setup_services()
-    
+
     transactions = None
-    
+
     # Run selected mode
-    if args.mode == 'processing':
+    if args.mode == "processing":
         transactions = processing_mode(args, services)
-    elif args.mode == 'calculation':
+    elif args.mode == "calculation":
         calculation_mode(args, services)
-    elif args.mode == 'all':
+    elif args.mode == "all":
         transactions = processing_mode(args, services)
         calculation_mode(args, services, transactions)
-    
+
     logger.info("Program completed successfully")
 
 
