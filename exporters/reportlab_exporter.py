@@ -17,6 +17,7 @@ from exporters.exporter_interface import ExporterInterface
 from calculators.fifo_calculator import FifoCalculationResult
 from calculators.dividend_calculator import DividendCalculationResult
 from calculators.interest_calculator import InterestCalculationResult
+from config.tax_treaties import has_tax_treaty
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,49 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
     def _register_fonts(self):
         """Register fonts for Polish characters"""
         try:
+            # macOS-specific font paths (commonly available fonts with Polish character support)
+            macos_font_candidates = [
+                ('/System/Library/Fonts/Supplemental/Arial Unicode.ttf', 'ArialUnicode', None),
+                ('/System/Library/Fonts/Helvetica.ttc', 'Helvetica', None),  # System Helvetica on macOS
+                ('/Library/Fonts/Arial.ttf', 'Arial', '/Library/Fonts/Arial Bold.ttf'),
+                ('/System/Library/Fonts/Supplemental/Arial.ttf', 'Arial', '/System/Library/Fonts/Supplemental/Arial Bold.ttf'),
+            ]
+
+            # Try macOS fonts first
+            for font_path, font_name, bold_path in macos_font_candidates:
+                if os.path.exists(font_path):
+                    try:
+                        pdfmetrics.registerFont(TTFont(font_name, font_path))
+                        if bold_path and os.path.exists(bold_path):
+                            pdfmetrics.registerFont(TTFont(f'{font_name}-Bold', bold_path))
+                            self.base_font_name = font_name
+                            self.bold_font_name = f'{font_name}-Bold'
+                        else:
+                            self.base_font_name = font_name
+                            self.bold_font_name = font_name
+                        self.logger.info(f"Using {font_name} font from {font_path}")
+                        return
+                    except Exception as e:
+                        self.logger.debug(f"Failed to register {font_name} from {font_path}: {e}")
+                        continue
+
+            # Standard font search paths for other systems
             font_paths = []
             windows_font_dir = os.environ.get('WINDIR')
             if windows_font_dir:
                 font_paths.append(os.path.join(windows_font_dir, 'Fonts'))
-            font_paths.extend(['/System/Library/Fonts', '/Library/Fonts', os.path.expanduser('~/Library/Fonts'),
-                '/usr/share/fonts/truetype/dejavu', '/usr/share/fonts/TTF', '/usr/share/fonts/truetype'])
+            font_paths.extend([
+                '/System/Library/Fonts',
+                '/Library/Fonts',
+                os.path.expanduser('~/Library/Fonts'),
+                '/usr/share/fonts/truetype/dejavu',
+                '/usr/share/fonts/TTF',
+                '/usr/share/fonts/truetype',
+                '/usr/share/fonts/truetype/liberation',
+                '/usr/share/fonts/truetype/liberation2',
+            ])
 
+            # Try DejaVu fonts (best Polish support)
             for font_dir in font_paths:
                 dejavu_path = os.path.join(font_dir, 'DejaVuSans.ttf')
                 dejavu_bold_path = os.path.join(font_dir, 'DejaVuSans-Bold.ttf')
@@ -56,6 +93,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                     self.logger.info(f"Using DejaVu fonts from {font_dir}")
                     return
 
+            # Try Arial fonts (good Polish support)
             for font_dir in font_paths:
                 arial_path = os.path.join(font_dir, 'arial.ttf')
                 arial_bold_path = os.path.join(font_dir, 'arialbd.ttf')
@@ -70,12 +108,41 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
                         self.bold_font_name = 'Arial'
                     self.logger.info(f"Using Arial fonts from {font_dir}")
                     return
+
+            # Try Liberation fonts (good Polish support, common on Linux)
+            for font_dir in font_paths:
+                liberation_path = os.path.join(font_dir, 'LiberationSans-Regular.ttf')
+                liberation_bold_path = os.path.join(font_dir, 'LiberationSans-Bold.ttf')
+                if os.path.exists(liberation_path):
+                    pdfmetrics.registerFont(TTFont('LiberationSans', liberation_path))
+                    if os.path.exists(liberation_bold_path):
+                        pdfmetrics.registerFont(TTFont('LiberationSans-Bold', liberation_bold_path))
+                        self.base_font_name = 'LiberationSans'
+                        self.bold_font_name = 'LiberationSans-Bold'
+                    else:
+                        self.base_font_name = 'LiberationSans'
+                        self.bold_font_name = 'LiberationSans'
+                    self.logger.info(f"Using Liberation fonts from {font_dir}")
+                    return
+
         except Exception as e:
             self.logger.error(f"Error registering fonts: {e}")
 
+        # Fallback to Helvetica with clear warning
         self.base_font_name = 'Helvetica'
         self.bold_font_name = 'Helvetica-Bold'
-        self.logger.warning("No custom fonts registered, using Helvetica")
+        self.logger.warning("=" * 80)
+        self.logger.warning("WARNING: No Unicode-compatible fonts found!")
+        self.logger.warning("Polish characters (ą, ć, ę, ł, ń, ó, ś, ź, ż) will NOT render correctly in PDF.")
+        self.logger.warning("")
+        self.logger.warning("To fix this, install DejaVu fonts:")
+        self.logger.warning("  macOS:   brew install --cask font-dejavu")
+        self.logger.warning("  Ubuntu:  sudo apt-get install fonts-dejavu")
+        self.logger.warning("  Fedora:  sudo dnf install dejavu-sans-fonts")
+        self.logger.warning("=" * 80)
+        print("\n⚠️  WARNING: Polish characters may not display correctly in PDF!")
+        print("   Install DejaVu fonts for proper Polish character support.")
+        print("   See log for installation instructions.\n")
 
     def _create_custom_styles(self):
         self.styles.add(ParagraphStyle(name='ReportTitle', parent=self.styles['Title'],
@@ -326,12 +393,14 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             return elements
 
         elements.append(Paragraph("2.1 Podsumowanie dywidend wg kraju", self.styles['ReportSection']))
-        summary_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "Dywidenda PLN", "Podatek pobrany PLN", "Podatek PL 19%", "Do zaplaty PL"]]
+        summary_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "UPO", "Dywidenda PLN", "Podatek pobrany PLN", "Podatek PL 19%", "Do zaplaty PL"]]
         summary_data = [summary_header]
         total_dividend = total_tax_abroad = total_tax_poland = total_tax_to_pay = Decimal('0')
 
         for country, summary in sorted(dividend_result.summaries.items()):
-            summary_data.append([country, self.format_currency(summary.total_dividend_pln),
+            # Check if country has tax treaty
+            treaty_status = "TAK" if summary.has_tax_treaty else "NIE"
+            summary_data.append([country, treaty_status, self.format_currency(summary.total_dividend_pln),
                 self.format_currency(summary.tax_paid_abroad_pln), self.format_currency(summary.tax_due_poland),
                 self.format_currency(summary.tax_to_pay)])
             total_dividend += summary.total_dividend_pln
@@ -339,15 +408,22 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             total_tax_poland += summary.tax_due_poland
             total_tax_to_pay += summary.tax_to_pay
 
-        summary_data.append(["RAZEM", self.format_currency(total_dividend), self.format_currency(total_tax_abroad),
+        summary_data.append(["RAZEM", "", self.format_currency(total_dividend), self.format_currency(total_tax_abroad),
             self.format_currency(total_tax_poland), self.format_currency(total_tax_to_pay)])
 
-        summary_table = Table(summary_data, colWidths=[4.0*cm, 3.5*cm, 3.5*cm, 3.5*cm, 3.5*cm], repeatRows=1)
+        summary_table = Table(summary_data, colWidths=[3.5*cm, 1.5*cm, 3.0*cm, 3.0*cm, 3.0*cm, 3.0*cm], repeatRows=1)
         summary_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name), ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'), ('FONTNAME', (0, -1), (-1, -1), self.bold_font_name),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black)]))
         elements.append(summary_table)
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Add explanation about tax treaties
+        elements.append(Paragraph("Uwaga o umowach UPO:", self.styles['ReportBodyText']))
+        elements.append(Paragraph("• UPO = TAK: Kraj ma umowę o unikaniu podwójnego opodatkowania z Polską. Podatek zapłacony za granicą jest odliczany od podatku w PL.", self.styles['ReportBodyText']))
+        elements.append(Paragraph("• UPO = NIE: Kraj NIE ma umowy z Polską. Pełne 19% podatku należy zapłacić w PL, niezależnie od podatku zapłaconego za granicą.", self.styles['ReportBodyText']))
+        elements.append(Spacer(1, 0.5*cm))
 
         for country_idx, (country, summary) in enumerate(sorted(dividend_result.summaries.items()), 1):
             elements.append(Paragraph(f"2.{country_idx + 1} Dywidendy - {country}", self.styles['ReportSection']))
@@ -414,6 +490,7 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
         elements = []
         elements.append(Paragraph("4. Dane do formularzy podatkowych", self.styles['ReportChapter']))
 
+        # Calculate FIFO totals
         fifo_df = fifo_result.to_dataframe()
         total_income = total_cost = profit = loss = Decimal('0')
         if not fifo_df.empty:
@@ -422,61 +499,183 @@ class ReportLabExporter(ExporterInterface[Dict[str, Any]]):
             if total_income > total_cost: profit = total_income - total_cost
             else: loss = total_cost - total_income
         tax_base = int(profit)
-        tax_due = int(tax_base * Decimal('0.19'))
+        tax_due_fifo = int(tax_base * Decimal('0.19'))
 
-        elements.append(Paragraph("4.1 Dane do deklaracji PIT-38", self.styles['ReportSection']))
-        pit38_data = [["Sekcja", "Opis", "Wartosc PLN"],
-            ["C.22", "Przychod", self.format_currency(total_income)],
-            ["C.23", "Koszty uzyskania przychodu", self.format_currency(total_cost)],
+        # Calculate dividend totals
+        div_income = div_tax_due = div_tax_paid_abroad = div_tax_to_pay = Decimal('0')
+        if dividend_result.summaries:
+            for summary in dividend_result.summaries.values():
+                div_income += summary.total_dividend_pln
+                div_tax_due += summary.tax_due_poland
+                div_tax_paid_abroad += summary.tax_paid_abroad_pln
+                div_tax_to_pay += summary.tax_to_pay
+
+        # Calculate interest totals
+        interest_income = interest_tax_due = Decimal('0')
+        if interest_result and interest_result.total_interest_pln > 0:
+            interest_income = interest_result.total_interest_pln
+            interest_tax_due = interest_result.total_tax_due
+
+        # Section 4.1 - PIT-38 Main Data (including interest)
+        elements.append(Paragraph("4.1 Dane do deklaracji PIT-38 - Sekcja C i D", self.styles['ReportSection']))
+
+        pit38_data = [["Pole", "Opis", "Wartosc PLN"],
+            ["C.22", "Przychod ze sprzedazy akcji (FIFO)", self.format_currency(total_income)],
+            ["C.23", "Koszty uzyskania przychodu (FIFO)", self.format_currency(total_cost)],
             ["C.26", "Dochod (jezeli C.24 > C.25)", self.format_currency(profit)],
             ["C.27", "Strata (jezeli C.24 < C.25)", self.format_currency(loss)],
-            ["D.29", "Podstawa obliczenia podatku", str(tax_base)],
-            ["D.31", "Podatek nalezny (19%)", str(tax_due)]]
-        pit38_table = Table(pit38_data, colWidths=[1.5*cm, 7*cm, 3*cm])
-        pit38_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name), ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (2, 1), (2, -1), 'RIGHT'), ('GRID', (0, 0), (-1, -1), 0.5, colors.black)]))
+            ["D.29", "Podstawa obliczenia podatku (z FIFO)", str(tax_base)],
+            ["D.31", "Podatek nalezny z akcji (19%)", str(tax_due_fifo)]]
+
+        # Add interest to PIT-38 if present
+        if interest_income > 0:
+            pit38_data.extend([
+                ["---", "--- ODSETKI (dodaj do powyzszych) ---", "---"],
+                ["C.22", "+ Przychod z odsetek", self.format_currency(interest_income)],
+                ["C.23", "+ Koszty (brak dla odsetek)", "0,00"],
+                ["D.29", "+ Podstawa z odsetek", self.format_currency(interest_income)],
+                ["D.31", "+ Podatek z odsetek (19%)", self.format_currency(interest_tax_due)]
+            ])
+
+        pit38_table = Table(pit38_data, colWidths=[1.5*cm, 8*cm, 3.5*cm])
+        pit38_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (2, 1), (2, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black)
+        ]))
         elements.append(pit38_table)
 
+        if interest_income > 0:
+            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Paragraph("Uwaga: Odsetki należy dodać do odpowiednich pól (przychód, podstawa, podatek) w PIT-38.", self.styles['ReportBodyText']))
+
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Section 4.2 - PIT-38 Section G (Dividends)
         if dividend_result.summaries:
-            elements.append(Paragraph("4.1.1 Sekcja G - Dywidendy zagraniczne", self.styles['ReportSection']))
-            g_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "Przychod PLN", "Podatek nalezny 19%", "Podatek zaplacony za granica", "Roznica"]]
+            elements.append(Paragraph("4.2 PIT-38 Sekcja G - Dywidendy zagraniczne", self.styles['ReportSection']))
+            g_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "UPO", "Przychod PLN", "Podatek PL 19%", "Podatek zagr.", "Do zaplaty"]]
             g_data = [g_header]
             for i, (country, summary) in enumerate(sorted(dividend_result.summaries.items()), 1):
-                g_data.append([f"G.{42+i}-{46+i} {country}", self.format_currency(summary.total_dividend_pln),
-                    self.format_currency(summary.tax_due_poland), self.format_currency(summary.tax_paid_abroad_pln),
-                    self.format_currency(summary.tax_to_pay)])
-            g_table = Table(g_data, colWidths=[5*cm, 3*cm, 3*cm, 3*cm, 3*cm])
-            g_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name), ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (1, 1), (-1, -1), 'RIGHT'), ('GRID', (0, 0), (-1, -1), 0.5, colors.black)]))
+                treaty_status = "TAK" if summary.has_tax_treaty else "NIE"
+                g_data.append([
+                    f"{country}",
+                    treaty_status,
+                    self.format_currency(summary.total_dividend_pln),
+                    self.format_currency(summary.tax_due_poland),
+                    self.format_currency(summary.tax_paid_abroad_pln),
+                    self.format_currency(summary.tax_to_pay)
+                ])
+            g_table = Table(g_data, colWidths=[4*cm, 1.5*cm, 2.8*cm, 2.8*cm, 2.8*cm, 2.8*cm])
+            g_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black)
+            ]))
             elements.append(g_table)
+            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Paragraph("Wypełnij odpowiednie pola G.42-G.71 dla każdego kraju w PIT-38.", self.styles['ReportBodyText']))
+            elements.append(Paragraph("UWAGA: Jeśli UPO=NIE, podatek zagraniczny NIE jest odliczany - zapłać pełne 19%!", self.styles['ReportBodyText']))
+            elements.append(Spacer(1, 0.5*cm))
 
-        if interest_result and interest_result.total_interest_pln > 0:
-            elements.append(Paragraph("4.1.2 Odsetki", self.styles['ReportSection']))
-            int_data = [["Pozycja", "Wartosc PLN"], ["Laczne odsetki", self.format_currency(interest_result.total_interest_pln)],
-                ["Podatek nalezny (19%)", self.format_currency(interest_result.total_tax_due)]]
-            int_table = Table(int_data, colWidths=[8*cm, 5*cm])
-            int_table.setStyle(self.summary_table_style)
-            elements.append(int_table)
-
-        elements.append(Paragraph("4.2 Dane do zalacznika PIT/ZG", self.styles['ReportSection']))
+        # Section 4.3 - PIT/ZG attachment
+        elements.append(Paragraph("4.3 Załącznik PIT/ZG - Źródła przychodów zagranicznych", self.styles['ReportSection']))
         if not fifo_df.empty:
             country_groups = fifo_df.groupby('country')
-            pitzg_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "Przychod PLN", "Koszty PLN", "Dochod PLN", "Podatek zaplacony"]]
+            pitzg_header = [self._create_wrapped_header_cell(h) for h in ["Panstwo", "Przychod PLN", "Koszty PLN", "Dochod PLN", "Podatek zagr."]]
             pitzg_data = [pitzg_header]
             for country, group in sorted(country_groups):
                 sec_income = Decimal(str(group['income_pln'].sum()))
                 sec_cost = Decimal(str(group['cost_pln'].sum()))
                 sec_profit = max(Decimal('0'), sec_income - sec_cost)
-                pitzg_data.append([country, self.format_currency(sec_income), self.format_currency(sec_cost), self.format_currency(sec_profit), "0,00"])
-            pitzg_table = Table(pitzg_data, colWidths=[4*cm, 4*cm, 4*cm, 4*cm, 4*cm])
-            pitzg_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name), ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (1, 1), (-1, -1), 'RIGHT'), ('GRID', (0, 0), (-1, -1), 0.5, colors.black)]))
+                pitzg_data.append([country, self.format_currency(sec_income), self.format_currency(sec_cost),
+                                   self.format_currency(sec_profit), "0,00"])
+            pitzg_table = Table(pitzg_data, colWidths=[4*cm, 4*cm, 4*cm, 4*cm, 3*cm])
+            pitzg_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black)
+            ]))
             elements.append(pitzg_table)
         else:
-            elements.append(Paragraph("Brak danych do wykazania w zalaczniku PIT/ZG.", self.styles['ReportBodyText']))
+            elements.append(Paragraph("Brak transakcji sprzedaży do wykazania w załączniku PIT/ZG.", self.styles['ReportBodyText']))
+
+        elements.append(PageBreak())
+
+        # Section 4.4 - FINAL SUMMARY WITH EXACT INSTRUCTIONS
+        elements.append(Paragraph("4.4 PODSUMOWANIE - CO GDZIE WPISAĆ", self.styles['ReportSection']))
+        elements.append(Paragraph("Poniżej znajdziesz konkretne kwoty do wpisania w poszczególne pola formularzy:", self.styles['ReportBodyText']))
+        elements.append(Spacer(1, 0.3*cm))
+
+        # Calculate grand totals
+        total_tax_to_pay = tax_due_fifo + div_tax_to_pay + interest_tax_due
+
+        summary_instructions = []
+        summary_instructions.append(["FORMULARZ", "POLE", "OPIS", "KWOTA"])
+
+        # PIT-38 Section C
+        summary_instructions.append(["PIT-38", "C.22", "Przychód (akcje + odsetki)",
+                                     self.format_currency(total_income + interest_income)])
+        summary_instructions.append(["PIT-38", "C.23", "Koszty (tylko z akcji)",
+                                     self.format_currency(total_cost)])
+        if profit > 0:
+            summary_instructions.append(["PIT-38", "C.26", "Dochód (jeśli >0)",
+                                         self.format_currency(profit + interest_income)])
+        if loss > 0:
+            summary_instructions.append(["PIT-38", "C.27", "Strata (jeśli <0)",
+                                         self.format_currency(loss)])
+
+        # PIT-38 Section D
+        summary_instructions.append(["PIT-38", "D.29", "Podstawa opodatkowania",
+                                     self.format_currency(Decimal(str(tax_base)) + interest_income)])
+        summary_instructions.append(["PIT-38", "D.31", "Podatek 19% (akcje + odsetki)",
+                                     self.format_currency(Decimal(str(tax_due_fifo)) + interest_tax_due)])
+
+        # PIT-38 Section G (Dividends)
+        if dividend_result.summaries:
+            summary_instructions.append(["---", "---", "--- DYWIDENDY ---", "---"])
+            for i, (country, summary) in enumerate(sorted(dividend_result.summaries.items()), 1):
+                field_num = 42 + (i-1) * 5
+                treaty_note = " [UPO: TAK]" if summary.has_tax_treaty else " [BRAK UPO!]"
+                summary_instructions.append([
+                    "PIT-38",
+                    f"G.{field_num}-{field_num+4}",
+                    f"Dywidendy {country}{treaty_note}",
+                    self.format_currency(summary.tax_to_pay)
+                ])
+
+        # Grand total
+        summary_instructions.append(["---", "---", "---", "---"])
+        summary_instructions.append(["RAZEM", "D.31 + G", "CAŁKOWITY PODATEK DO ZAPŁATY",
+                                     f"{self.format_currency(total_tax_to_pay)} PLN"])
+
+        summary_table = Table(summary_instructions, colWidths=[2.5*cm, 2.5*cm, 7*cm, 3*cm])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, 0), self.bold_font_name),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTNAME', (0, -1), (-1, -1), self.bold_font_name),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+            ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+        ]))
+        elements.append(summary_table)
+
+        elements.append(Spacer(1, 0.5*cm))
+        elements.append(Paragraph("WAŻNE PRZYPOMNIENIA:", self.styles['ReportSection']))
+        elements.append(Paragraph("• Załącz formularz PIT/ZG do PIT-38 (źródła zagraniczne)", self.styles['ReportBodyText']))
+        elements.append(Paragraph("• Dla krajów BEZ umowy UPO: płacisz pełne 19% podatku w Polsce!", self.styles['ReportBodyText']))
+        elements.append(Paragraph("• Odsetki zostały JUŻ UWZGLĘDNIONE w polach C.22, D.29 i D.31", self.styles['ReportBodyText']))
+        elements.append(Paragraph("• Sprawdź dokładnie kwoty przed wysłaniem deklaracji", self.styles['ReportBodyText']))
 
         return elements
 

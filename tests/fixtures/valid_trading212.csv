@@ -1,0 +1,6 @@
+Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Exchange rate,Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion fee,Currency (Currency conversion fee),French transaction tax,Currency (French transaction tax)
+Market buy,2024-01-15 10:30:00,US0378331005,AAPL,Apple Inc.,10,150.00,USD,,1500.00,USD,,,0.50,USD,,
+Market buy,2024-02-01 14:20:00,US0378331005,AAPL,Apple Inc.,5,155.00,USD,,775.00,USD,,,0.25,USD,,
+Market sell,2024-03-10 11:45:00,US0378331005,AAPL,Apple Inc.,8,160.00,USD,,1280.00,USD,,,0.40,USD,,
+Dividend (Ordinary),2024-03-15 09:00:00,US0378331005,AAPL,Apple Inc.,15,0.24,USD,,3.60,USD,0.54,USD,,,
+Interest on cash,2024-03-31 23:59:00,,,,1,2.50,EUR,,2.50,EUR,,,,,

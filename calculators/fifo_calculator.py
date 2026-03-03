@@ -6,6 +6,7 @@ import logging
 from models.transaction import Transaction, BuyTransaction, SellTransaction, FifoMatchResult
 from models.portfolio import Portfolio
 from calculators.calculator_interface import CalculatorInterface
+from utils.exceptions import InsufficientSharesError, FIFOCalculationError
 
 logger = logging.getLogger(__name__)
 
@@ -142,9 +143,14 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
                     matches.extend(sale_matches)
                     stats['sell_count'] += 1
                     stats['fifo_match_count'] += len(sale_matches)
-                except ValueError as e:
-                    issues.append(f"Error processing sale of {tx.ticker}: {str(e)}")
+                except InsufficientSharesError as e:
+                    # User-friendly error message for insufficient shares
+                    issues.append(f"Error processing sale of {tx.ticker} on {tx.date.strftime('%Y-%m-%d')}: {e.message}")
                     logger.warning(f"FIFO error for {tx.ticker}: {e}")
+                except Exception as e:
+                    # Unexpected errors
+                    issues.append(f"Unexpected error processing sale of {tx.ticker} on {tx.date.strftime('%Y-%m-%d')}: {type(e).__name__}: {str(e)}")
+                    logger.error(f"Unexpected FIFO error for {tx.ticker}: {type(e).__name__}: {e}")
 
         logger.info(f"FIFO: {stats['buy_count']} buys added, {stats['sell_count']} sells processed, {skipped_sells} sells skipped (wrong year), {stats['fifo_match_count']} matches")
 

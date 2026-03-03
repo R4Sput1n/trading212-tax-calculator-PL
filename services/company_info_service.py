@@ -9,6 +9,7 @@ except ImportError:
     YFINANCE_AVAILABLE = False
 
 from services.isin_service import ISINService
+from utils.exceptions import CompanyInfoError, MissingDependencyError
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,17 @@ class YFinanceCompanyInfoService(CompanyInfoService):
         Returns:
             Country name or "Unknown" if not available
         """
+        # Validate inputs
+        if not isin or not isinstance(isin, str):
+            logger.warning(f"Invalid ISIN provided: {isin}")
+            return "Unknown"
+        
         # Use cache if available
         if isin in self._cache:
             return self._cache[isin]
         
         if not YFINANCE_AVAILABLE:
+            logger.warning("yfinance is not installed. Install with: pip install yfinance")
             # Fall back to ISIN lookup
             isin_country = self.isin_service.get_country_from_isin(isin)
             if isin_country:
@@ -96,8 +103,12 @@ class YFinanceCompanyInfoService(CompanyInfoService):
                     self._cache[isin] = "Unknown"
                     
                     return "Unknown"
+        except (KeyError, AttributeError, TypeError) as e:
+            # yfinance returned invalid data
+            logger.debug(f"Invalid data from yfinance for {isin} ({name}): {type(e).__name__}")
         except Exception as e:
-            logger.debug(f"Could not determine country for {isin} ({name}): {e}")
+            # Network error, timeout, or other issues
+            logger.debug(f"Could not get company info for {isin} ({name}): {type(e).__name__}: {str(e)}")
             
             # Fall back to ISIN country lookup
             isin_country = self.isin_service.get_country_from_isin(isin)

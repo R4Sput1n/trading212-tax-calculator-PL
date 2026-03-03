@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 from models.transaction import BuyTransaction, SellTransaction, FifoMatchResult
+from utils.exceptions import InsufficientSharesError, FIFOCalculationError
 
 
 @dataclass
@@ -41,16 +42,21 @@ class Portfolio:
         """
         Process a sale transaction using FIFO method.
         Returns a list of FifoMatchResult objects representing the sale.
+        
+        Raises:
+            InsufficientSharesError: If trying to sell more shares than available
+            FIFOCalculationError: If other calculation errors occur
         """
         ticker = sale.ticker
         
         if ticker not in self.positions:
-            raise ValueError(f"Cannot sell {ticker}: not in portfolio")
+            raise InsufficientSharesError(ticker, 0, float(sale.quantity))
         
         position = self.positions[ticker]
+        available_shares = position.get_total_shares()
         
-        if position.get_total_shares() < sale.quantity:
-            raise ValueError(f"Cannot sell {sale.quantity} shares of {ticker}: only {position.get_total_shares()} available")
+        if available_shares < sale.quantity:
+            raise InsufficientSharesError(ticker, float(available_shares), float(sale.quantity))
         
         results = []
         remaining_shares = sale.quantity

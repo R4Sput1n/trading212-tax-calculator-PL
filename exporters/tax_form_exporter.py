@@ -150,10 +150,12 @@ class TaxFormExporter(ExporterInterface[TaxFormData]):
             tax_due = Decimal(str(div["tax_due"]))
             tax_paid = Decimal(str(div["tax_paid_abroad"]))
             tax_to_pay = Decimal(str(div["tax_to_pay"]))
-            
+            has_treaty = div.get("has_tax_treaty", True)
+            treaty_note = " [UPO: TAK]" if has_treaty else " [BRAK UPO!]"
+
             dividend_data.append({
                 "KOMÓRKA": f"G.43-G.47 ({country})",
-                "NAZWA": f"Dywidendy z {country}",
+                "NAZWA": f"Dywidendy z {country}{treaty_note}",
                 "WARTOŚĆ": float(div["dividend_amount"])
             })
             
@@ -299,14 +301,15 @@ class TaxFormGenerator:
         
         # Prepare dividend data
         dividend_data = []
-        
+
         for country, summary in dividend_result.summaries.items():
             dividend_data.append({
                 "country": country,
                 "dividend_amount": summary.total_dividend_pln,
                 "tax_due": summary.tax_due_poland,
                 "tax_paid_abroad": summary.tax_paid_abroad_pln,
-                "tax_to_pay": summary.tax_to_pay
+                "tax_to_pay": summary.tax_to_pay,
+                "has_tax_treaty": summary.has_tax_treaty
             })
         
         # Prepare interest data

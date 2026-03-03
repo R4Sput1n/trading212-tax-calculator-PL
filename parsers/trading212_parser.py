@@ -1,9 +1,10 @@
 import pandas as pd
 from dateutil.parser import parse
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any, Optional
 import glob
 import logging
+import os
 
 from models.transaction import (
     Transaction, BuyTransaction, SellTransaction, 
@@ -12,6 +13,16 @@ from models.transaction import (
 from parsers.parser_interface import ParserInterface
 from services.exchange_rate_service import ExchangeRateService
 from services.company_info_service import CompanyInfoService
+from utils.exceptions import (
+    FileNotFoundError as CustomFileNotFoundError,
+    FileReadError,
+    InvalidCSVFormatError,
+    InvalidTransactionDataError,
+    DateParsingError,
+    NumberParsingError,
+    handle_file_not_found,
+    handle_parsing_error
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +96,38 @@ class Trading212Parser(ParserInterface):
         self.company_info_service = company_info_service
     
     def parse_file(self, file_path: str) -> List[Transaction]:
-        """Parse a single Trading212 CSV file"""
-        df = pd.read_csv(file_path)
-        return self.parse_data(df)
+        """
+        Parse a single Trading212 CSV file.
+        
+        Args:
+            file_path: Path to the CSV file
+            
+        Returns:
+            List of Transaction objects
+            
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            FileReadError: If file cannot be read
+            InvalidCSVFormatError: If CSV format is invalid
+        """
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise handle_file_not_found(file_path)
+        
+        # Check if file is readable
+        if not os.access(file_path, os.R_OK):
+            raise FileReadError(file_path, "File exists but cannot be read. Check permissions.")
+        
+        try:
+            df = pd.read_csv(file_path)
+        except pd.errors.EmptyDataError:
+            raise FileReadError(file_path, "File is empty.")
+        except pd.errors.ParserError as e:
+            raise InvalidCSVFormatError(file_path, reason=f"CSV parsing failed: {str(e)}")
+        except Exception as e:
+            raise FileReadError(file_path, f"Unexpected error reading file: {str(e)}")
+        
+        return self.parse_data(df, source_file=file_path)
 
     def parse_files(self, file_paths: List[str]) -> List[Transaction]:
         """Parse multiple Trading212 CSV files with duplicate detection"""
@@ -122,13 +162,20 @@ class Trading212Parser(ParserInterface):
         file_paths = glob.glob(glob_pattern)
         return self.parse_files(file_paths)
     
-    def _detect_csv_format(self, df: pd.DataFrame) -> str:
+    def _detect_csv_format(self, df: pd.DataFrame, source_file: str = None) -> str:
         """
         Detect whether the CSV is original Trading212 format or processed format.
+        
+        Args:
+            df: DataFrame to check
+            source_file: Optional source file path for error messages
         
         Returns:
             'original' for Trading212 CSV export
             'processed' for our intermediate processed CSV
+            
+        Raises:
+            InvalidCSVFormatError: If format cannot be determined
         """
         # Original Trading212 CSV has 'Action' column
         if 'Action' in df.columns:
@@ -137,56 +184,86 @@ class Trading212Parser(ParserInterface):
         elif 'action' in df.columns:
             return 'processed'
         else:
-            raise ValueError(
-                "CSV format not recognized. Expected 'Action' column (Trading212 export) "
-                "or 'action' column (processed CSV)."
+            raise InvalidCSVFormatError(
+                source_file or "unknown",
+                reason="CSV format not recognized. Expected 'Action' column (Trading212 export) or 'action' column (processed CSV)."
             )
     
-    def parse_data(self, df: pd.DataFrame) -> List[Transaction]:
+    def parse_data(self, df: pd.DataFrame, source_file: str = None) -> List[Transaction]:
         """
         Parse Trading212 data from a pandas DataFrame.
         Automatically detects whether it's an original or processed CSV.
         
         Args:
             df: DataFrame containing Trading212 transaction data
+            source_file: Optional source file path for error messages
             
         Returns:
             List of Transaction objects
+            
+        Raises:
+            InvalidCSVFormatError: If CSV format is invalid
         """
-        csv_format = self._detect_csv_format(df)
+        # Check if DataFrame is empty
+        if df.empty:
+            logger.warning(f"Empty DataFrame provided{' from ' + source_file if source_file else ''}")
+            return []
+        
+        csv_format = self._detect_csv_format(df, source_file)
         
         if csv_format == 'original':
-            return self._parse_original_format(df)
+            return self._parse_original_format(df, source_file)
         else:
-            return self._parse_processed_format(df)
+            return self._parse_processed_format(df, source_file)
     
-    def _parse_original_format(self, df: pd.DataFrame) -> List[Transaction]:
+    def _parse_original_format(self, df: pd.DataFrame, source_file: str = None) -> List[Transaction]:
         """
         Parse original Trading212 CSV export format.
         
         Args:
             df: DataFrame containing Trading212 transaction data
+            source_file: Optional source file path for error messages
             
         Returns:
             List of Transaction objects
         """
         transactions = []
+        errors = []
+        row_number = 0
         
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            row_number = idx + 2  # +2 for header row and 0-indexing
+            
             # Skip rows without Action
             if pd.isna(row.get('Action')):
                 continue
                 
             try:
-                # Parse common fields
-                date = parse(row['Time'])
+                # Parse date field
+                try:
+                    date = parse(row['Time'])
+                except (KeyError, ValueError, TypeError) as e:
+                    raise DateParsingError(str(row.get('Time', 'N/A')))
+                
+                # Get action
                 action = row['Action']
+                
+                # Parse string fields (safe)
                 ticker = row.get('Ticker', '')
                 name = row.get('Name', '')
                 isin = row.get('ISIN', '')
-                quantity = Decimal(str(row['No. of shares'])) if pd.notna(row.get('No. of shares')) else Decimal('0')
-                price = Decimal(str(row['Price / share'])) if pd.notna(row.get('Price / share')) else Decimal('0')
                 currency = row.get('Currency (Price / share)', 'PLN')
+                
+                # Parse numeric fields with error handling
+                try:
+                    quantity = Decimal(str(row['No. of shares'])) if pd.notna(row.get('No. of shares')) else Decimal('0')
+                except (ValueError, InvalidOperation) as e:
+                    raise NumberParsingError(str(row.get('No. of shares', 'N/A')), 'No. of shares')
+                
+                try:
+                    price = Decimal(str(row['Price / share'])) if pd.notna(row.get('Price / share')) else Decimal('0')
+                except (ValueError, InvalidOperation) as e:
+                    raise NumberParsingError(str(row.get('Price / share', 'N/A')), 'Price / share')
                 
                 # Skip non-investment transactions
                 tx_type = self._get_transaction_type(action)
@@ -363,25 +440,50 @@ class Trading212Parser(ParserInterface):
                 if transaction:
                     transactions.append(transaction)
             
-            except Exception as e:
-                logger.error(f"Error processing row: {e}")
+            except (DateParsingError, NumberParsingError, InvalidTransactionDataError) as e:
+                # These are our custom exceptions with good error messages
+                error_msg = f"Row {row_number}: {str(e)}"
+                logger.warning(error_msg)
+                errors.append(error_msg)
                 continue
+            except Exception as e:
+                # Unexpected errors
+                error_msg = f"Row {row_number}: Unexpected error - {type(e).__name__}: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                continue
+        
+        # Log summary
+        if errors:
+            logger.warning(f"Parsed {len(transactions)} transactions with {len(errors)} errors")
+            if len(errors) <= 5:
+                for error in errors:
+                    logger.warning(f"  - {error}")
+            else:
+                for error in errors[:3]:
+                    logger.warning(f"  - {error}")
+                logger.warning(f"  ... and {len(errors) - 3} more errors")
         
         return transactions
     
-    def _parse_processed_format(self, df: pd.DataFrame) -> List[Transaction]:
+    def _parse_processed_format(self, df: pd.DataFrame, source_file: str = None) -> List[Transaction]:
         """
         Parse processed CSV format (our intermediate format with 'action' column).
         
         Args:
             df: DataFrame containing processed transaction data
+            source_file: Optional source file path for error messages
             
         Returns:
             List of Transaction objects
         """
         transactions = []
+        errors = []
+        row_number = 0
         
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            row_number = idx + 2  # +2 for header row and 0-indexing
+            
             # Skip rows without action
             if pd.isna(row.get('action')):
                 continue
@@ -389,15 +491,29 @@ class Trading212Parser(ParserInterface):
             try:
                 action = row['action']
                 
-                # Parse common fields
-                date = parse(str(row['date']))
+                # Parse date field
+                try:
+                    date = parse(str(row['date']))
+                except (KeyError, ValueError, TypeError) as e:
+                    raise DateParsingError(str(row.get('date', 'N/A')))
+                
+                # Parse string fields (safe)
                 ticker = row.get('ticker', '') if pd.notna(row.get('ticker')) else ''
                 symbol = row.get('symbol', ticker) if pd.notna(row.get('symbol')) else ticker
                 name = row.get('name', '') if pd.notna(row.get('name')) else ''
                 isin = row.get('isin', '') if pd.notna(row.get('isin')) else ''
-                quantity = Decimal(str(row['quantity'])) if pd.notna(row.get('quantity')) else Decimal('0')
-                price = Decimal(str(row['price_per_share'])) if pd.notna(row.get('price_per_share')) else Decimal('0')
                 currency = row.get('currency', 'PLN') if pd.notna(row.get('currency')) else 'PLN'
+                
+                # Parse numeric fields with error handling
+                try:
+                    quantity = Decimal(str(row['quantity'])) if pd.notna(row.get('quantity')) else Decimal('0')
+                except (ValueError, InvalidOperation) as e:
+                    raise NumberParsingError(str(row.get('quantity', 'N/A')), 'quantity')
+                
+                try:
+                    price = Decimal(str(row['price_per_share'])) if pd.notna(row.get('price_per_share')) else Decimal('0')
+                except (ValueError, InvalidOperation) as e:
+                    raise NumberParsingError(str(row.get('price_per_share', 'N/A')), 'price_per_share')
                 
                 # Get exchange rate (already calculated in processed file)
                 exchange_rate = Decimal(str(row['exchange_rate'])) if pd.notna(row.get('exchange_rate')) else Decimal('1.0')
@@ -511,8 +627,28 @@ class Trading212Parser(ParserInterface):
                 if transaction:
                     transactions.append(transaction)
             
-            except Exception as e:
-                logger.error(f"Error processing processed row: {e}")
+            except (DateParsingError, NumberParsingError, InvalidTransactionDataError) as e:
+                # These are our custom exceptions with good error messages
+                error_msg = f"Row {row_number}: {str(e)}"
+                logger.warning(error_msg)
+                errors.append(error_msg)
                 continue
+            except Exception as e:
+                # Unexpected errors
+                error_msg = f"Row {row_number}: Unexpected error - {type(e).__name__}: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                continue
+        
+        # Log summary
+        if errors:
+            logger.warning(f"Parsed {len(transactions)} transactions with {len(errors)} errors")
+            if len(errors) <= 5:
+                for error in errors:
+                    logger.warning(f"  - {error}")
+            else:
+                for error in errors[:3]:
+                    logger.warning(f"  - {error}")
+                logger.warning(f"  ... and {len(errors) - 3} more errors")
         
         return transactions
