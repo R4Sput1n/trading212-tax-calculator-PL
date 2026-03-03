@@ -1,0 +1,4 @@
+Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Exchange rate,Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion fee,Currency (Currency conversion fee),French transaction tax,Currency (French transaction tax)
+Market buy,INVALID_DATE,US0378331005,AAPL,Apple Inc.,10,150.00,USD,,1500.00,USD,,,0.50,USD,,
+Market buy,2024-02-01 14:20:00,US0378331005,AAPL,Apple Inc.,NOT_A_NUMBER,155.00,USD,,775.00,USD,,,0.25,USD,,
+Market sell,2024-03-10 11:45:00,US0378331005,AAPL,Apple Inc.,8,INVALID_PRICE,USD,,1280.00,USD,,,0.40,USD,,

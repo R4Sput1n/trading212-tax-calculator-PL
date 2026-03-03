@@ -8,6 +8,7 @@ from decimal import Decimal
 import logging
 
 from utils.date_utils import is_business_day, get_previous_business_day
+from utils.exceptions import ExchangeRateError, APIError
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,14 @@ class NBPExchangeRateService(ExchangeRateService):
 
         Returns:
             Exchange rate or None if not available
+            
+        Raises:
+            ExchangeRateError: If rate cannot be retrieved after all attempts
         """
+        # Validate inputs
+        if date is None:
+            raise ExchangeRateError("N/A", "N/A", "Date cannot be None")
+        
         # Check for None or NaN currency code
         if currency_code is None or pd.isna(currency_code) or currency_code == "":
             return 1.0  # Default to 1.0 for deposit transactions with no currency
@@ -88,7 +96,7 @@ class NBPExchangeRateService(ExchangeRateService):
             url = f"{self.base_url}/{currency_code}/{formatted_date}/"
 
             try:
-                response = requests.get(url)
+                response = requests.get(url, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     rate = data["rates"][0]["mid"]
@@ -101,19 +109,66 @@ class NBPExchangeRateService(ExchangeRateService):
                     self._cache[cache_key] = rate
 
                     return rate
-                else:
-                    # Try the previous business day
-                    logger.debug(f'Could not get exchange rate for day {prev_business_day} for currency {currency_code}')
+                elif response.status_code == 404:
+                    # Rate not available for this date, try previous business day
+                    logger.debug(f'Exchange rate not available for {currency_code} on {prev_business_day}')
                     prev_business_day = get_previous_business_day(prev_business_day)
                     logger.debug(f'Retrying for {prev_business_day}')
+                elif response.status_code == 400:
+                    # Bad request - likely invalid currency code
+                    raise ExchangeRateError(
+                        original_currency,
+                        formatted_date,
+                        f"Invalid currency code or date format. HTTP {response.status_code}"
+                    )
+                else:
+                    # Other HTTP errors
+                    logger.warning(f'NBP API returned HTTP {response.status_code} for {currency_code} on {prev_business_day}')
+                    prev_business_day = get_previous_business_day(prev_business_day)
+            except requests.exceptions.Timeout:
+                logger.warning(f"Timeout getting exchange rate for {currency_code} on {prev_business_day} (attempt {attempt + 1}/{max_attempts})")
+                if attempt == max_attempts - 1:
+                    # Last attempt failed
+                    raise ExchangeRateError(
+                        original_currency,
+                        formatted_date,
+                        "NBP API timeout. Check your internet connection."
+                    )
+                prev_business_day = get_previous_business_day(prev_business_day)
+            except requests.exceptions.ConnectionError:
+                logger.warning(f"Connection error getting exchange rate for {currency_code} (attempt {attempt + 1}/{max_attempts})")
+                if attempt == max_attempts - 1:
+                    raise ExchangeRateError(
+                        original_currency,
+                        formatted_date,
+                        "Cannot connect to NBP API. Check your internet connection."
+                    )
+                prev_business_day = get_previous_business_day(prev_business_day)
+            except (KeyError, ValueError, TypeError) as e:
+                # Invalid response format
+                logger.error(f"Invalid response from NBP API: {e}")
+                raise ExchangeRateError(
+                    original_currency,
+                    formatted_date,
+                    f"Invalid response format from NBP API: {str(e)}"
+                )
             except Exception as e:
-                logger.error(f"Error getting exchange rate for attempt {attempt + 1}: {e}")
-                # Try the next day anyway
+                logger.error(f"Unexpected error getting exchange rate for attempt {attempt + 1}: {e}")
+                if attempt == max_attempts - 1:
+                    raise ExchangeRateError(
+                        original_currency,
+                        formatted_date,
+                        f"Unexpected error: {type(e).__name__}: {str(e)}"
+                    )
                 prev_business_day = get_previous_business_day(prev_business_day)
 
         # If we get here, we couldn't find a rate after all attempts
         logger.warning(f"Could not get exchange rate for {original_currency} after {max_attempts} attempts")
-        return None
+        raise ExchangeRateError(
+            original_currency,
+            date.strftime("%Y-%m-%d"),
+            f"Exchange rate not available after {max_attempts} attempts. The date may be too far in the past or during a non-trading period."
+        )
 
 
 class MockExchangeRateService(ExchangeRateService):

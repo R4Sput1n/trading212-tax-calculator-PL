@@ -23,6 +23,17 @@ from models.transaction import Transaction
 from utils.logging_config import configure_logging
 from exporters.reportlab_exporter import ReportLabExporter
 from utils.env_config import load_personal_data
+from utils.exceptions import (
+    TaxCalculatorError,
+    FileNotFoundError as CustomFileNotFoundError,
+    FileReadError,
+    FileWriteError,
+    InvalidCSVFormatError,
+    ExchangeRateError,
+    APIError,
+    ExcelExportError,
+    PDFExportError
+)
 
 
 def parse_arguments():
@@ -94,15 +105,45 @@ def processing_mode(args, services):
     )
 
     # Parse files
-    if os.path.isdir(args.input):
-        input_path = os.path.join(args.input, "*.csv")
-        transactions = parser.parse_glob(input_path)
-    elif '*' in args.input:
-        transactions = parser.parse_glob(args.input)
-    elif os.path.isfile(args.input):
-        transactions = parser.parse_file(args.input)
-    else:
-        logger.error(f"Input path not found: {args.input}")
+    try:
+        if os.path.isdir(args.input):
+            input_path = os.path.join(args.input, "*.csv")
+            transactions = parser.parse_glob(input_path)
+        elif '*' in args.input:
+            transactions = parser.parse_glob(args.input)
+        elif os.path.isfile(args.input):
+            transactions = parser.parse_file(args.input)
+        else:
+            print(f"\n❌ Error: Input path not found: {args.input}")
+            print("Please check the file path and try again.")
+            print("\nTip: Export your Trading212 transaction history as CSV first.")
+            sys.exit(1)
+    except CustomFileNotFoundError as e:
+        print(f"\n❌ {e.message}")
+        if e.details:
+            print(f"   {e.details}")
+        sys.exit(1)
+    except (FileReadError, InvalidCSVFormatError) as e:
+        print(f"\n❌ {e.message}")
+        if e.details:
+            print(f"   {e.details}")
+        sys.exit(1)
+    except ExchangeRateError as e:
+        print(f"\n❌ Exchange Rate Error: {e.message}")
+        if e.details:
+            print(f"   {e.details}")
+        print("\nThe program will continue, but some transactions may have incomplete data.")
+        print("Check the log file for more details.")
+        sys.exit(1)
+    except TaxCalculatorError as e:
+        print(f"\n❌ Error: {e.message}")
+        if e.details:
+            print(f"   {e.details}")
+        sys.exit(1)
+    except Exception as e:
+        logger.exception("Unexpected error during processing")
+        print(f"\n❌ Unexpected error: {type(e).__name__}: {str(e)}")
+        print(f"   Check the log file for details: {settings.DEFAULT_LOG_FILE}")
         sys.exit(1)
 
     logger.info(f"Parsed {len(transactions)} transactions")
@@ -197,11 +238,24 @@ def calculation_mode(args, services, transactions=None):
     if transactions is None:
         # Load processed data
         if not os.path.isfile(args.input):
-            logger.error(f"Input file not found: {args.input}")
+            print(f"\n❌ Error: Input file not found: {args.input}")
+            print("Please run processing mode first or provide a valid processed CSV file.")
             sys.exit(1)
 
-        import pandas as pd
-        df = pd.read_csv(args.input)
+        try:
+            import pandas as pd
+            df = pd.read_csv(args.input)
+        except pd.errors.EmptyDataError:
+            print(f"\n❌ Error: Input file is empty: {args.input}")
+            sys.exit(1)
+        except pd.errors.ParserError as e:
+            print(f"\n❌ Error: Cannot parse CSV file: {args.input}")
+            print(f"   {str(e)}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n❌ Error reading input file: {args.input}")
+            print(f"   {type(e).__name__}: {str(e)}")
+            sys.exit(1)
 
         # Create parser
         parser = Trading212Parser(
@@ -210,7 +264,13 @@ def calculation_mode(args, services, transactions=None):
         )
 
         # Parse data
-        transactions = parser.parse_data(df)
+        try:
+            transactions = parser.parse_data(df, args.input)
+        except (InvalidCSVFormatError, FileReadError) as e:
+            print(f"\n❌ {e.message}")
+            if e.details:
+                print(f"   {e.details}")
+            sys.exit(1)
 
         if args.year:
             logger.info(f"Loaded {len(transactions)} transactions, will filter sales/dividends for year {args.year}")
@@ -288,7 +348,9 @@ def calculation_mode(args, services, transactions=None):
             total_tax_paid = sum(d['tax_paid_abroad'] for d in tax_form_data.pit38.dividend_data)
             total_tax_to_pay = sum(d['tax_to_pay'] for d in tax_form_data.pit38.dividend_data)
             for div in tax_form_data.pit38.dividend_data:
-                print(f"  {div['country']}:")
+                treaty_status = div.get('has_tax_treaty', True)
+                treaty_str = " [UPO: TAK]" if treaty_status else " [BRAK UPO - pełne 19%!]"
+                print(f"  {div['country']}{treaty_str}:")
                 print(f"    Dividend: {div['dividend_amount']:.2f} PLN")
                 print(f"    Tax paid abroad: {div['tax_paid_abroad']:.2f} PLN")
                 print(f"    Tax to pay in Poland: {div['tax_to_pay']:.2f} PLN")
@@ -333,35 +395,75 @@ def calculation_mode(args, services, transactions=None):
 
 
 def main():
-    """Main function"""
-    # Parse arguments
-    args = parse_arguments()
-    
-    # Set up logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    configure_logging(log_level, log_file=settings.DEFAULT_LOG_FILE)
-    
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starting {settings.APP_NAME} {settings.APP_VERSION}")
-    
-    # Create default directories
-    settings.init_directories()
-    
-    # Setup services
-    services = setup_services()
-    
-    transactions = None
-    
-    # Run selected mode
-    if args.mode == 'processing':
-        transactions = processing_mode(args, services)
-    elif args.mode == 'calculation':
-        calculation_mode(args, services)
-    elif args.mode == 'all':
-        transactions = processing_mode(args, services)
-        calculation_mode(args, services, transactions)
-    
-    logger.info("Program completed successfully")
+    """Main function with comprehensive error handling"""
+    try:
+        # Parse arguments
+        args = parse_arguments()
+        
+        # Set up logging
+        log_level = logging.DEBUG if args.verbose else logging.INFO
+        configure_logging(log_level, log_file=settings.DEFAULT_LOG_FILE)
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting {settings.APP_NAME} {settings.APP_VERSION}")
+        
+        # Create default directories
+        try:
+            settings.init_directories()
+        except PermissionError as e:
+            print(f"\n❌ Error: Cannot create required directories.")
+            print(f"   Permission denied. Check your write permissions.")
+            print(f"   Details: {str(e)}")
+            sys.exit(1)
+        
+        # Setup services
+        try:
+            services = setup_services()
+        except Exception as e:
+            logger.exception("Failed to initialize services")
+            print(f"\n❌ Error: Failed to initialize services.")
+            print(f"   {type(e).__name__}: {str(e)}")
+            print(f"   Check your internet connection and installed dependencies.")
+            sys.exit(1)
+        
+        transactions = None
+        
+        # Run selected mode
+        if args.mode == 'processing':
+            transactions = processing_mode(args, services)
+        elif args.mode == 'calculation':
+            calculation_mode(args, services)
+        elif args.mode == 'all':
+            transactions = processing_mode(args, services)
+            calculation_mode(args, services, transactions)
+        
+        logger.info("Program completed successfully")
+        print(f"\n✅ Program completed successfully!")
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Program interrupted by user (Ctrl+C)")
+        sys.exit(130)
+    except TaxCalculatorError as e:
+        # Our custom exceptions with user-friendly messages
+        print(f"\n❌ Error: {e.message}")
+        if e.details:
+            print(f"   {e.details}")
+        sys.exit(1)
+    except Exception as e:
+        # Unexpected errors
+        print(f"\n❌ Unexpected error: {type(e).__name__}: {str(e)}")
+        print(f"   This is likely a bug. Please report it at:")
+        print(f"   https://github.com/R4Sput1n/trading212-tax-calculator-PL/issues")
+        print(f"\n   Log file: {settings.DEFAULT_LOG_FILE}")
+        
+        # Try to log the exception
+        try:
+            logger = logging.getLogger(__name__)
+            logger.exception("Unexpected error in main()")
+        except:
+            pass
+        
+        sys.exit(1)
 
 
 if __name__ == "__main__":

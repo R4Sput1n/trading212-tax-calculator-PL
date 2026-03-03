@@ -2,9 +2,13 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from decimal import Decimal
 import pandas as pd
+import logging
 
 from models.transaction import Transaction, DividendTransaction
 from calculators.calculator_interface import CalculatorInterface
+from config.tax_treaties import has_tax_treaty
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -15,6 +19,7 @@ class DividendSummary:
     tax_paid_abroad_pln: Decimal = Decimal('0')
     tax_due_poland: Decimal = Decimal('0')
     tax_to_pay: Decimal = Decimal('0')
+    has_tax_treaty: bool = True  # Whether country has double taxation treaty with Poland
     transactions: List[DividendTransaction] = field(default_factory=list)
 
 
@@ -116,14 +121,44 @@ class DividendCalculator(CalculatorInterface[List[Transaction], DividendCalculat
         if tax_year is not None:
             dividend_transactions = [tx for tx in dividend_transactions if tx.date.year == tax_year]
 
-        # Validate input data
-        issues = self.validate(dividend_transactions)
-        if issues and "No dividend transactions found" in issues:
-            # If only issue is no dividends, return empty result without issues
-            issues = []
+        # Check if there are any dividends at all
+        if not dividend_transactions:
+            return DividendCalculationResult(issues=[])
+
+        # Validate and filter out invalid dividends
+        issues = []
+        valid_dividends = []
+
+        for i, tx in enumerate(dividend_transactions):
+            tx_issues = []
+
+            if tx.ticker == '':
+                tx_issues.append(f"Dividend #{i} ({tx.name or 'Unknown'}, {tx.date}) has no ticker")
+
+            if tx.quantity <= 0:
+                tx_issues.append(f"Dividend #{i} ({tx.name or 'Unknown'}, {tx.date}) has invalid quantity: {tx.quantity}")
+
+            if tx.exchange_rate is None and tx.currency != 'PLN':
+                tx_issues.append(f"Dividend #{i} ({tx.name or 'Unknown'}, {tx.date}) has no exchange rate for currency: {tx.currency}")
+
+            if tx.total_value_pln is None:
+                tx_issues.append(f"Dividend #{i} ({tx.name or 'Unknown'}, {tx.date}) has no PLN value")
+
+            if tx.country is None or tx.country == "":
+                tx_issues.append(f"Dividend #{i} ({tx.name or 'Unknown'}, {tx.date}) has no country information")
+
+            # If there are issues with this dividend, log them but don't fail completely
+            if tx_issues:
+                issues.extend(tx_issues)
+            else:
+                valid_dividends.append(tx)
+
+        # If no valid dividends after filtering, return empty result with issues
+        if not valid_dividends:
             return DividendCalculationResult(issues=issues)
-        elif issues:
-            return DividendCalculationResult(issues=issues)
+
+        # Use valid dividends for calculation
+        dividend_transactions = valid_dividends
 
         # Statistics
         stats = {
@@ -161,12 +196,23 @@ class DividendCalculator(CalculatorInterface[List[Transaction], DividendCalculat
         
         # Calculate tax due in Poland and tax to pay
         for country, summary in summaries.items():
+            # Check if country has tax treaty with Poland
+            summary.has_tax_treaty = has_tax_treaty(country)
+
             # Tax due in Poland (19% of dividend)
             summary.tax_due_poland = summary.total_dividend_pln * self.tax_rate
             stats['total_tax_due_poland'] += summary.tax_due_poland
-            
-            # Tax to pay (difference, not less than 0)
-            summary.tax_to_pay = max(Decimal('0'), summary.tax_due_poland - summary.tax_paid_abroad_pln)
+
+            # Tax to pay depends on whether country has tax treaty
+            if summary.has_tax_treaty:
+                # With treaty: can deduct foreign tax (but not below 0)
+                summary.tax_to_pay = max(Decimal('0'), summary.tax_due_poland - summary.tax_paid_abroad_pln)
+                logger.info(f"{country}: HAS treaty - tax_to_pay = max(0, {summary.tax_due_poland:.2f} - {summary.tax_paid_abroad_pln:.2f}) = {summary.tax_to_pay:.2f} PLN")
+            else:
+                # Without treaty: full 19% tax in Poland regardless of foreign tax paid
+                summary.tax_to_pay = summary.tax_due_poland
+                logger.warning(f"{country}: NO treaty with Poland - full 19% tax due: {summary.tax_to_pay:.2f} PLN (foreign tax {summary.tax_paid_abroad_pln:.2f} PLN NOT deductible)")
+
             stats['total_tax_to_pay'] += summary.tax_to_pay
         
         # Create result
