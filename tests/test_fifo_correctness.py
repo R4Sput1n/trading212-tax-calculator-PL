@@ -601,8 +601,73 @@ class TestTaxYearFiltering:
         # Should only include 2024 sale
         assert len(result_2024.matches) == 1
         assert result_2024.matches[0].sell_date.year == 2024
-        
-        # Note: When filtering by tax year, the calculator skips processing sales from other years
-        # So portfolio reflects only: buy 10, sell 5 (2024) = 5 remaining
-        # The 2023 sale is not processed when filtering for 2024
-        assert result_2024.portfolio.positions["AAPL"].get_total_shares() == Decimal("5")  # 10 - 5 (only 2024 sale)
+
+    def test_fifo_processes_historical_sales_when_filtering_by_year(self):
+        """Test that filtering by year doesn't skip historical sales, maintaining correct FIFO queue"""
+        # Buy in 2023
+        buy = BuyTransaction(
+            date=datetime(2023, 12, 1),
+            ticker="AAPL",
+            symbol="AAPL",
+            isin="US0378331005",
+            name="Apple Inc.",
+            quantity=Decimal("10"),
+            price_per_share=Decimal("100"),
+            currency="USD",
+            exchange_rate=Decimal("4.0"),
+            total_value_foreign=Decimal("1000"),
+            total_value_pln=Decimal("4000"),
+            fees_foreign=Decimal("0"),
+            fees_pln=Decimal("0"),
+            currency_conversion_fee_pln=Decimal("0"),
+            transaction_tax_pln=Decimal("0"),
+            other_fees_pln=Decimal("0"),
+            country="United States"
+        )
+
+        # Sell in 2024
+        sell_2024 = SellTransaction(
+            date=datetime(2024, 1, 15),
+            ticker="AAPL",
+            symbol="AAPL",
+            isin="US0378331005",
+            name="Apple Inc.",
+            quantity=Decimal("5"),
+            price_per_share=Decimal("150"),
+            currency="USD",
+            exchange_rate=Decimal("4.0"),
+            total_value_foreign=Decimal("750"),
+            total_value_pln=Decimal("3000"),
+            fees_foreign=Decimal("0"),
+            fees_pln=Decimal("0"),
+            currency_conversion_fee_pln=Decimal("0"),
+            transaction_tax_pln=Decimal("0"),
+            other_fees_pln=Decimal("0"),
+            country="United States"
+        )
+
+        # Sell in 2023
+        sell_2023 = SellTransaction(
+            date=datetime(2023, 12, 20),
+            ticker="AAPL",
+            symbol="AAPL",
+            isin="US0378331005",
+            name="Apple Inc.",
+            quantity=Decimal("3"),
+            price_per_share=Decimal("120"),
+            currency="USD",
+            exchange_rate=Decimal("4.0"),
+            total_value_foreign=Decimal("360"),
+            total_value_pln=Decimal("1440"),
+            fees_foreign=Decimal("0"),
+            fees_pln=Decimal("0"),
+            currency_conversion_fee_pln=Decimal("0"),
+            transaction_tax_pln=Decimal("0"),
+            other_fees_pln=Decimal("0"),
+            country="United States"
+        )
+
+        calculator = FifoCalculator()
+        result_2024 = calculator.calculate([buy, sell_2023, sell_2024], tax_year=2024)
+
+        assert result_2024.portfolio.positions["AAPL"].get_total_shares() == Decimal("2")
