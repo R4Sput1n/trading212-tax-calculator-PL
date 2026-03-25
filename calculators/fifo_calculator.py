@@ -132,14 +132,14 @@ class FifoCalculator(CalculatorInterface[List[Transaction], FifoCalculationResul
                 stats['buy_count'] += 1
 
             elif isinstance(tx, SellTransaction):
-                # Skip this sale if it's not in the specified tax year
-                if tax_year is not None and tx.date.year != tax_year:
-                    skipped_sells += 1
-                    continue
-
                 try:
-                    # Process sale using FIFO
                     sale_matches = portfolio.process_sale(tx)
+
+                    # Skip this sale if it's not in the specified tax year
+                    if tax_year is not None and tx.date.year != tax_year:
+                        skipped_sells += 1
+                        continue
+
                     matches.extend(sale_matches)
                     stats['sell_count'] += 1
                     stats['fifo_match_count'] += len(sale_matches)

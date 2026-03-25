@@ -255,7 +255,7 @@ class TestTaxCreditCalculations:
             currency_conversion_fee_pln=Decimal("0"),
             transaction_tax_pln=Decimal("0"),
             other_fees_pln=Decimal("0"),
-            country="High Tax Country",
+            country="United States",
             withholding_tax_foreign=Decimal("30"),  # 30% withheld
             withholding_tax_pln=Decimal("120")  # 30 * 4.0
         )
@@ -263,7 +263,7 @@ class TestTaxCreditCalculations:
         calculator = DividendCalculator(tax_rate=Decimal("0.19"))
         result = calculator.calculate([dividend])
         
-        summary = result.summaries["High Tax Country"]
+        summary = result.summaries["United States"]
         
         # Polish tax due: 400 * 0.19 = 76 PLN
         assert summary.tax_due_poland == Decimal("76")

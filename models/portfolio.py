@@ -6,23 +6,34 @@ from typing import Dict, List, Optional
 from models.transaction import BuyTransaction, SellTransaction, FifoMatchResult
 from utils.exceptions import InsufficientSharesError, FIFOCalculationError
 
+@dataclass
+class TaxLot:
+    """Represents a specific lot of purchased shares, keeping track of remaining quantity without mutating the original transaction."""
+    transaction: BuyTransaction
+    remaining_quantity: Decimal
+
+    def get_proportional_value(self, used_quantity: Decimal, total_value: Optional[Decimal]) -> Decimal:
+        """Calculates the proportional value based on the original transaction quantity."""
+        if not total_value:
+            return Decimal('0')
+        return total_value * (used_quantity / self.transaction.quantity)
 
 @dataclass
 class PortfolioPosition:
     """A position in a portfolio representing shares of a specific ticker"""
     ticker: str
-    purchases: List[BuyTransaction] = field(default_factory=list)
+    purchases: List[TaxLot] = field(default_factory=list)
     
     def add_purchase(self, transaction: BuyTransaction) -> None:
         """Add a purchase transaction to this position"""
-        self.purchases.append(transaction)
+        lot = TaxLot(transaction=transaction, remaining_quantity=transaction.quantity)
+        self.purchases.append(lot)
         # Sort by date to ensure FIFO order
-        self.purchases.sort(key=lambda x: x.date)
-    
+        self.purchases.sort(key=lambda x: x.transaction.date)
+
     def get_total_shares(self) -> Decimal:
         """Get the total number of shares in this position"""
-        return sum(purchase.quantity for purchase in self.purchases)
-
+        return sum(lot.remaining_quantity for lot in self.purchases)
 
 @dataclass
 class Portfolio:
@@ -66,23 +77,26 @@ class Portfolio:
         
         # Loop through purchases until all sold shares are accounted for
         while remaining_shares > 0 and position.purchases:
-            oldest_purchase = position.purchases[0]
-            
-            # How many shares we're selling from this purchase
-            shares_from_purchase = min(remaining_shares, oldest_purchase.quantity)
-            
-            # Calculate the ratio of sold shares to purchased shares
-            ratio = shares_from_purchase / oldest_purchase.quantity
+            oldest_lot = position.purchases[0]
+            oldest_purchase = oldest_lot.transaction  # Zawsze nienaruszona, oryginalna transakcja
+
+            # How many shares we're selling from this lot
+            shares_from_purchase = min(remaining_shares, oldest_lot.remaining_quantity)
+
+            # Calculate the ratio for the sale side (sell fees are still based on the sale transaction)
             sale_ratio = shares_from_purchase / sale.quantity
 
-            # Calculate the income and purchase cost (without fees)
+            # Calculate the income
             income_pln = shares_from_purchase * sale_value_per_share_pln
-            purchase_cost = (oldest_purchase.total_value_pln * ratio)
 
-            # Calculate detailed buy fees
-            buy_currency_conversion_fee = (oldest_purchase.currency_conversion_fee_pln or Decimal('0')) * ratio
-            buy_transaction_tax = (oldest_purchase.transaction_tax_pln or Decimal('0')) * ratio
-            buy_other_fees = (oldest_purchase.other_fees_pln or Decimal('0')) * ratio
+            purchase_cost = oldest_lot.get_proportional_value(shares_from_purchase, oldest_purchase.total_value_pln)
+
+            # Calculate detailed buy fees based on the lot's original state
+            buy_currency_conversion_fee = oldest_lot.get_proportional_value(shares_from_purchase,
+                                                                            oldest_purchase.currency_conversion_fee_pln)
+            buy_transaction_tax = oldest_lot.get_proportional_value(shares_from_purchase,
+                                                                    oldest_purchase.transaction_tax_pln)
+            buy_other_fees = oldest_lot.get_proportional_value(shares_from_purchase, oldest_purchase.other_fees_pln)
 
             # Calculate detailed sell fees
             sell_currency_conversion_fee = (sale.currency_conversion_fee_pln or Decimal('0')) * sale_ratio
@@ -123,11 +137,11 @@ class Portfolio:
             results.append(result)
             
             # Update the purchase or remove it if fully used
-            if shares_from_purchase < oldest_purchase.quantity:
-                oldest_purchase.quantity -= shares_from_purchase
+            if shares_from_purchase < oldest_lot.remaining_quantity:
+                oldest_lot.remaining_quantity -= shares_from_purchase
             else:
                 position.purchases.pop(0)
-            
+
             remaining_shares -= shares_from_purchase
 
             logger = logging.getLogger(__name__)

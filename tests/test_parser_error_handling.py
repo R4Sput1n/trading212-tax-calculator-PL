@@ -1,6 +1,8 @@
 """
 Tests for parser error handling
 """
+from unittest.mock import patch
+
 import pytest
 import os
 import tempfile
@@ -72,15 +74,12 @@ class TestFileErrors:
         test_file = tmp_path / "unreadable.csv"
         test_file.write_text("test")
         test_file.chmod(0o000)
-        
-        try:
+
+        with patch('os.access', return_value=False):
             with pytest.raises(FileReadError) as exc_info:
                 parser.parse_file(str(test_file))
-            
+
             assert "cannot be read" in str(exc_info.value).lower()
-        finally:
-            # Restore permissions for cleanup
-            test_file.chmod(0o644)
 
 
 class TestCSVFormatErrors:
